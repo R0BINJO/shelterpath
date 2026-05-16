@@ -4,7 +4,7 @@
  */
 
 import { CircleAlert, CloudOff, Info, WifiOff } from 'lucide-react-native';
-import { Platform, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
@@ -133,11 +133,6 @@ export function TopStatusBar({
             </Text>
           </Pill>
 
-          <View className="flex-row items-center rounded-full border border-amber-500/40 bg-amber-500/15 px-2.5 py-1.5">
-            <Text className="text-[11px] font-semibold text-amber-300">
-              {Platform.OS === 'web' ? 'Demo data · prototype' : 'Demo data'}
-            </Text>
-          </View>
         </View>
       </View>
     </SafeAreaView>
