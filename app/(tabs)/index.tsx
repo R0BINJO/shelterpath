@@ -1,32 +1,32 @@
 /*
- * SafeRoute Varjumine — main map screen.
+ * SafeRoute Varjumine — main map screen (real interactive map).
  *
- * Single full-screen surface:
- *  - SVG interactive map (components/MapCanvas.tsx) with hardcoded demo data
- *  - Top status pills (crisis mode / offline ready / demo data label)
- *  - Floating "Find nearest shelter" CTA
- *  - Right FAB stack: offline plan, zoom, locate
- *  - Bottom sheet for shelter detail + route instructions
- *  - Demo data label is also rendered inside the map area itself
+ * Map renderer (platform-split):
+ *   web    → maplibre-gl with OpenFreeMap bright/dark vector tiles
+ *   native → react-native-maps with OpenStreetMap raster tiles
+ *
+ * Other layers (composed on top of the map):
+ *   - Top status pills (crisis / offline / demo data / info)
+ *   - Right floating stack (offline plan, map style, locate)
+ *   - "Find nearest shelter" CTA
+ *   - Bottom sheet with shelter detail + route source + turn-by-turn
+ *   - Demo data chips
+ *   - Saved-fallback shortcut pill
+ *   - Offline plan + info modals
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Platform, Pressable, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { InfoModal } from '@/components/saferoute/InfoModal';
-import { MapCanvas } from '@/components/MapCanvas';
-import { OfflinePlanModal } from '@/components/saferoute/OfflinePlanModal';
-import { ShelterSheet } from '@/components/saferoute/ShelterSheet';
-import { Text } from '@/components/ui/text';
 import { FindNearestFab, MapFabStack } from '@/components/saferoute/FloatingControls';
+import { InfoModal } from '@/components/saferoute/InfoModal';
+import { OfflinePlanModal } from '@/components/saferoute/OfflinePlanModal';
+import SafeRouteMap from '@/components/SafeRouteMap';
+import { ShelterSheet } from '@/components/saferoute/ShelterSheet';
 import { TopStatusBar } from '@/components/saferoute/TopStatusBar';
-import {
-  findNearestShelter,
-  getRouteForShelter,
-  SHELTERS,
-  type Shelter,
-} from '@/lib/shelters';
+import { Text } from '@/components/ui/text';
+import { SHELTERS, type Shelter } from '@/lib/shelters';
 import { useSafeRouteStore } from '@/lib/saferouteStore';
 
 export default function MapScreen() {
@@ -38,75 +38,107 @@ export default function MapScreen() {
     offlinePlanOpen,
     infoOpen,
     fallbacks,
+    userLocation,
+    isLiveUserLocation,
+    mapStyle,
+    route,
+    routeState,
+    routeError,
+    recenterToken,
+    fitRouteToken,
     selectShelter,
+    navigateToShelter,
+    findNearest,
     toggleCrisisMode,
     toggleOfflineMode,
     setOfflinePlanOpen,
     setInfoOpen,
+    setMapStyle,
+    setUserLocation,
+    bumpRecenter,
     saveFallback,
+    clearRoute,
   } = useSafeRouteStore();
-
-  const [zoom, setZoom] = useState(1);
 
   const selectedShelter: Shelter | null = useMemo(() => {
     if (selectedShelterId === null) return null;
     return SHELTERS.find((s) => s.id === selectedShelterId) ?? null;
   }, [selectedShelterId]);
 
-  const route = useMemo(() => {
-    if (!selectedShelter) return null;
-    return getRouteForShelter(selectedShelter.id) ?? null;
-  }, [selectedShelter]);
-
   const isSelectedSaved = useMemo(() => {
     if (!selectedShelter) return false;
     return Object.values(fallbacks).some((f) => f?.shelterId === selectedShelter.id);
   }, [fallbacks, selectedShelter]);
 
+  // Try browser geolocation once on web for the "Using device location" label.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return undefined;
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return undefined;
+    let cancelled = false;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        if (cancelled) return;
+        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }, true);
+      },
+      () => {
+        // Denied / unavailable — keep HARDCODED DEMO USER LOCATION.
+      },
+      { timeout: 5000, maximumAge: 60_000 },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [setUserLocation]);
+
   const handleSelectShelter = useCallback(
     (s: Shelter) => {
-      // Tap on marker → show details; route only after Navigate / "Find nearest".
-      selectShelter(s.id, false);
+      selectShelter(s.id);
     },
     [selectShelter],
   );
 
   const handleFindNearest = useCallback(() => {
-    const nearest = findNearestShelter();
-    selectShelter(nearest.id, true);
-  }, [selectShelter]);
+    void findNearest();
+  }, [findNearest]);
 
   const handleNavigate = useCallback(() => {
-    if (selectedShelter) selectShelter(selectedShelter.id, true);
-  }, [selectShelter, selectedShelter]);
+    if (selectedShelter) void navigateToShelter(selectedShelter);
+  }, [navigateToShelter, selectedShelter]);
 
   const handleSaveFallback = useCallback(() => {
     if (!selectedShelter) return;
-    // Default slot — user can re-assign from the Offline Plan panel.
     saveFallback('generic', selectedShelter);
   }, [saveFallback, selectedShelter]);
 
   const handleCloseSheet = useCallback(() => {
-    selectShelter(null, false);
-  }, [selectShelter]);
+    selectShelter(null);
+    clearRoute();
+  }, [clearRoute, selectShelter]);
 
   const handleLocate = useCallback(() => {
-    // Recenter would reset MapCanvas pan; for the demo we keep that responsibility
-    // there and simply nudge zoom back to 1.
-    setZoom(1);
-  }, []);
+    bumpRecenter();
+  }, [bumpRecenter]);
+
+  const handleToggleStyle = useCallback(() => {
+    setMapStyle(mapStyle === 'bright' ? 'dark' : 'bright');
+  }, [mapStyle, setMapStyle]);
 
   return (
     <View className="flex-1 bg-background">
-      <MapCanvas
+      <SafeRouteMap
+        shelters={SHELTERS}
         selectedShelterId={selectedShelterId}
-        route={showRoute ? route : null}
+        route={route}
+        userLocation={userLocation}
+        isLiveUserLocation={isLiveUserLocation}
         crisisMode={crisisMode}
+        mapStyle={mapStyle}
         onSelectShelter={handleSelectShelter}
-        zoom={zoom}
+        recenterToken={recenterToken}
+        fitRouteToken={fitRouteToken}
       />
 
-      {/* Demo data label anchored inside the map area (visible even with sheet closed). */}
+      {/* Persistent demo + data-source chips bottom-centre */}
       <SafeAreaView
         edges={['bottom']}
         pointerEvents="box-none"
@@ -121,11 +153,23 @@ export default function MapScreen() {
       >
         <View
           pointerEvents="none"
-          className="mb-2 rounded-full bg-card/85 border border-border px-3 py-1.5"
+          className="mb-2 flex-row gap-1.5 flex-wrap justify-center px-3"
         >
-          <Text className="text-[10.5px] text-muted-foreground">
-            Demo mode: shelters, routes, danger area and map data are hardcoded.
-          </Text>
+          <View className="rounded-full bg-card/90 border border-border px-2.5 py-1">
+            <Text className="text-[10.5px] text-muted-foreground">
+              {isLiveUserLocation ? 'Using device location' : 'Using demo location'}
+            </Text>
+          </View>
+          <View className="rounded-full bg-card/90 border border-border px-2.5 py-1">
+            <Text className="text-[10.5px] text-muted-foreground">
+              Map: OpenFreeMap tiles · OSM data
+            </Text>
+          </View>
+          <View className="rounded-full bg-amber-500/20 border border-amber-500/40 px-2.5 py-1">
+            <Text className="text-[10.5px] font-semibold text-amber-300">
+              Demo shelters · demo danger zone
+            </Text>
+          </View>
         </View>
       </SafeAreaView>
 
@@ -137,36 +181,36 @@ export default function MapScreen() {
         onOpenInfo={() => setInfoOpen(true)}
       />
 
-      {/* Small persistent disclaimer chip on the right edge */}
+      {/* Persistent disclaimer */}
       <View
         pointerEvents="none"
         style={{
           position: 'absolute',
           left: 12,
-          bottom: Platform.select({ web: 110, default: 130 }),
+          bottom: Platform.select({ web: 130, default: 150 }),
           zIndex: 12,
         }}
       >
-        <View className="rounded-xl bg-card/85 border border-border px-2.5 py-1.5 max-w-[200px]">
+        <View className="rounded-xl bg-card/90 border border-border px-2.5 py-1.5 max-w-[220px]">
           <Text className="text-[10.5px] text-muted-foreground leading-[14px]">
-            SafeRoute is a preparedness assistant, not an official emergency system.
+            SafeRoute is a civilian preparedness assistant, not an official emergency system. Always follow official instructions.
           </Text>
         </View>
       </View>
 
       <MapFabStack
         onLocate={handleLocate}
-        onZoomIn={() => setZoom((z) => Math.min(2.5, z + 0.25))}
-        onZoomOut={() => setZoom((z) => Math.max(0.6, z - 0.25))}
         onOpenPlan={() => setOfflinePlanOpen(true)}
-        bottomInset={Platform.select({ web: 130, default: 150 }) ?? 150}
+        onToggleStyle={handleToggleStyle}
+        mapStyleLabel={crisisMode ? 'Dark' : mapStyle === 'bright' ? 'Bright' : 'Dark'}
+        bottomInset={Platform.select({ web: 150, default: 170 }) ?? 170}
       />
 
-      {/* Saved fallback shortcut pill (visible when something is saved and sheet is closed) */}
+      {/* Saved fallback shortcut pill */}
       {!selectedShelter && Object.keys(fallbacks).length > 0 ? (
         <View
           pointerEvents="box-none"
-          style={{ position: 'absolute', left: 12, top: 130, zIndex: 14 }}
+          style={{ position: 'absolute', left: 12, top: 140, zIndex: 14 }}
         >
           <Pressable
             onPress={() => setOfflinePlanOpen(true)}
@@ -184,13 +228,16 @@ export default function MapScreen() {
 
       <FindNearestFab
         onPress={handleFindNearest}
-        bottomInset={Platform.select({ web: 56, default: 70 }) ?? 70}
+        loading={routeState === 'loading'}
+        bottomInset={Platform.select({ web: 70, default: 80 }) ?? 80}
       />
 
       <ShelterSheet
         shelter={selectedShelter}
-        route={route}
+        route={showRoute ? route : null}
         routeShown={showRoute}
+        routeState={routeState}
+        routeError={routeError}
         isSaved={isSelectedSaved}
         onClose={handleCloseSheet}
         onNavigate={handleNavigate}

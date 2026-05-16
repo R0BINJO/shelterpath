@@ -3,11 +3,17 @@
  *
  * Two states: collapsed (peek), expanded (route + instructions).
  * Drag handle is functional via PanGesture to feel like a real map sheet.
+ *
+ * Route source is surfaced explicitly:
+ *   - "Live route · OSRM foot/walking"  (online OSRM-compatible endpoint)
+ *   - "Offline route · simplified demo walking graph"  (local Dijkstra)
+ *   - "Demo fallback · straight-line estimate"  (haversine)
  */
 
 import { useEffect } from 'react';
 import {
   Accessibility,
+  ActivityIcon,
   BadgeCheck,
   BookmarkPlus,
   CircleCheck,
@@ -15,10 +21,12 @@ import {
   Droplets,
   Footprints,
   Navigation,
+  Radio,
   Users,
+  WifiOff,
   Zap,
 } from 'lucide-react-native';
-import { Pressable, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Extrapolation,
@@ -32,21 +40,26 @@ import Animated, {
 
 import { Text } from '@/components/ui/text';
 import { cn } from '@/lib/utils';
-import { ROUTE_INSTRUCTIONS, type RoutePolyline, type Shelter } from '@/lib/shelters';
+import { ROUTE_INSTRUCTIONS, type Shelter } from '@/lib/shelters';
+import type { RouteResult, RouteSource } from '@/lib/routing';
 import { SHELTER_COLORS } from '@/lib/constants';
+
+type RouteUiState = 'idle' | 'loading' | 'ready' | 'error';
 
 type Props = {
   shelter: Shelter | null;
-  route: RoutePolyline | null;
+  route: RouteResult | null;
   routeShown: boolean;
+  routeState: RouteUiState;
+  routeError: string | null;
   isSaved: boolean;
   onClose: () => void;
   onNavigate: () => void;
   onSaveFallback: () => void;
 };
 
-const COLLAPSED_HEIGHT = 320;
-const EXPANDED_HEIGHT = 560;
+const COLLAPSED_HEIGHT = 340;
+const EXPANDED_HEIGHT = 600;
 
 function Stat({
   icon,
@@ -76,21 +89,51 @@ function YesNoIcon({ value }: { value: boolean }) {
   );
 }
 
+function RouteSourceChip({ source, label }: { source: RouteSource; label: string }) {
+  const colors: Record<RouteSource, { bg: string; border: string; dot: string }> = {
+    'live': {
+      bg: 'bg-emerald-500/15',
+      border: 'border-emerald-500/40',
+      dot: 'bg-emerald-400',
+    },
+    'offline-graph': {
+      bg: 'bg-amber-500/15',
+      border: 'border-amber-500/40',
+      dot: 'bg-amber-400',
+    },
+    'fallback-line': {
+      bg: 'bg-rose-500/15',
+      border: 'border-rose-500/40',
+      dot: 'bg-rose-400',
+    },
+  };
+  const c = colors[source];
+  const Icon = source === 'live' ? Radio : source === 'offline-graph' ? WifiOff : ActivityIcon;
+  return (
+    <View className={cn('flex-row items-center gap-1.5 rounded-full border px-2.5 py-1', c.bg, c.border)}>
+      <View className={cn('h-1.5 w-1.5 rounded-full', c.dot)} />
+      <Icon className="text-foreground" size={12} />
+      <Text className="text-foreground text-[11px] font-semibold">{label}</Text>
+    </View>
+  );
+}
+
 export function ShelterSheet({
   shelter,
   route,
   routeShown,
+  routeState,
+  routeError,
   isSaved,
   onClose,
   onNavigate,
   onSaveFallback,
 }: Props) {
-  const offset = useSharedValue(EXPANDED_HEIGHT); // hidden state: pushed off-screen
+  const offset = useSharedValue(EXPANDED_HEIGHT);
   const startOffset = useSharedValue(0);
 
   useEffect(() => {
     if (shelter) {
-      // Open at collapsed peek when a shelter is freshly selected.
       offset.value = withSpring(EXPANDED_HEIGHT - COLLAPSED_HEIGHT, {
         damping: 18,
         stiffness: 160,
@@ -101,7 +144,6 @@ export function ShelterSheet({
   }, [offset, shelter]);
 
   useEffect(() => {
-    // Auto-expand when navigation is triggered so route instructions are visible.
     if (shelter && routeShown) {
       offset.value = withSpring(0, { damping: 18, stiffness: 160 });
     }
@@ -146,18 +188,18 @@ export function ShelterSheet({
   if (!shelter) return null;
 
   const color = SHELTER_COLORS[shelter.type];
+  // Prefer live route distances when available — they're the real numbers.
+  const distanceMeters = route?.distanceMeters ?? shelter.distanceMeters;
+  const walkingMin = route?.walkingTimeMinutes ?? shelter.walkingTimeMinutes;
+  const distanceLabel =
+    distanceMeters >= 1000 ? `${(distanceMeters / 1000).toFixed(2)} km` : `${distanceMeters} m`;
 
   return (
     <>
       <Animated.View
         pointerEvents="none"
         style={[
-          {
-            position: 'absolute',
-            inset: 0,
-            backgroundColor: 'black',
-            zIndex: 18,
-          },
+          { position: 'absolute', inset: 0, backgroundColor: 'black', zIndex: 18 },
           backdropStyle,
         ]}
       />
@@ -198,7 +240,7 @@ export function ShelterSheet({
                   {shelter.name}
                 </Text>
                 <Text className="text-muted-foreground text-[13px] mt-0.5">
-                  {shelter.distanceMeters} m · {shelter.walkingTimeMinutes} min walk
+                  {distanceLabel} · {walkingMin} min walk
                 </Text>
               </View>
               <Pressable
@@ -219,12 +261,12 @@ export function ShelterSheet({
               <Stat
                 icon={<Footprints color="#60a5fa" size={16} />}
                 label="Distance"
-                value={`${shelter.distanceMeters} m`}
+                value={distanceLabel}
               />
               <Stat
                 icon={<Navigation color="#60a5fa" size={16} />}
                 label="Walking"
-                value={`${shelter.walkingTimeMinutes} min`}
+                value={`${walkingMin} min`}
               />
               <Stat
                 icon={<Users color="#a78bfa" size={16} />}
@@ -281,23 +323,67 @@ export function ShelterSheet({
             </View>
 
             <Text className="text-[10.5px] text-muted-foreground mt-2 italic">
-              Demo values · not official information
+              Demo shelter data, not official information
             </Text>
 
-            {routeShown && route ? (
+            {routeShown ? (
               <View className="mt-4 rounded-xl border border-primary/40 bg-primary/10 px-3 py-3">
-                <Text className="text-foreground text-[13px] font-semibold mb-1">
-                  Shortest demo route
-                </Text>
-                <Text className="text-muted-foreground text-[12px] mb-2">
-                  {route.distanceMeters} m · {route.walkingTimeMinutes} min walk
-                </Text>
-                {ROUTE_INSTRUCTIONS.map((line) => (
-                  <View key={line} className="flex-row items-start gap-2 mt-1">
-                    <View className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
-                    <Text className="text-foreground text-[12.5px] flex-1">{line}</Text>
-                  </View>
-                ))}
+                <View className="flex-row items-center justify-between mb-2">
+                  <Text className="text-foreground text-[13px] font-semibold">
+                    Walking route
+                  </Text>
+                  {routeState === 'loading' ? (
+                    <View className="flex-row items-center gap-1.5">
+                      <ActivityIndicator size="small" color="#60a5fa" />
+                      <Text className="text-muted-foreground text-[11px]">Calculating…</Text>
+                    </View>
+                  ) : route ? (
+                    <RouteSourceChip source={route.source} label={routeLabel(route.source)} />
+                  ) : routeState === 'error' ? (
+                    <Text className="text-destructive text-[11px]">Failed</Text>
+                  ) : null}
+                </View>
+
+                {route ? (
+                  <>
+                    <Text className="text-muted-foreground text-[12px] mb-1">
+                      {distanceLabel} · {walkingMin} min walk
+                    </Text>
+                    <Text className="text-muted-foreground text-[10.5px] italic mb-2">
+                      {route.sourceLabel}
+                    </Text>
+
+                    {route.steps && route.steps.length > 0 ? (
+                      <View className="mb-2">
+                        <Text className="text-foreground text-[11.5px] font-semibold mb-1">
+                          Turn-by-turn
+                        </Text>
+                        {route.steps.slice(0, 6).map((step, i) => (
+                          <View key={`step-${i}-${step.slice(0, 16)}`} className="flex-row items-start gap-2 mt-1">
+                            <Text className="text-muted-foreground text-[11px] w-5">
+                              {i + 1}.
+                            </Text>
+                            <Text className="text-foreground text-[12px] flex-1">{step}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+
+                    <Text className="text-foreground text-[11.5px] font-semibold mt-1 mb-1">
+                      Calm safety reminders
+                    </Text>
+                    {ROUTE_INSTRUCTIONS.map((line) => (
+                      <View key={line} className="flex-row items-start gap-2 mt-0.5">
+                        <View className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
+                        <Text className="text-foreground text-[12.5px] flex-1">{line}</Text>
+                      </View>
+                    ))}
+                  </>
+                ) : routeState === 'error' ? (
+                  <Text className="text-destructive text-[12px]">
+                    {routeError ?? 'Could not compute route.'}
+                  </Text>
+                ) : null}
               </View>
             ) : null}
 
@@ -306,11 +392,13 @@ export function ShelterSheet({
                 onPress={onNavigate}
                 accessibilityRole="button"
                 accessibilityLabel="Navigate to shelter"
+                disabled={routeState === 'loading'}
                 className="flex-1 flex-row items-center justify-center gap-2 rounded-full bg-primary min-h-[48px] active:opacity-90"
+                style={{ opacity: routeState === 'loading' ? 0.7 : 1 }}
               >
                 <Navigation color="#ffffff" size={18} />
                 <Text className="text-primary-foreground text-[14px] font-semibold">
-                  Navigate
+                  {routeState === 'loading' ? 'Routing…' : 'Navigate'}
                 </Text>
               </Pressable>
               <Pressable
@@ -333,4 +421,17 @@ export function ShelterSheet({
       </Animated.View>
     </>
   );
+}
+
+function routeLabel(source: RouteSource): string {
+  switch (source) {
+    case 'live':
+      return 'Live route';
+    case 'offline-graph':
+      return 'Offline graph';
+    case 'fallback-line':
+      return 'Demo fallback';
+    default:
+      return 'Route';
+  }
 }

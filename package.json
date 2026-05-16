@@ -34,6 +34,7 @@
     "expo-status-bar": "~3.0.9",
     "expo-system-ui": "~6.0.9",
     "lucide-react-native": "^0.562.0",
+    "maplibre-gl": "^5.24.0",
     "nativewind": "~4.2.1",
     "pigeon-maps": "^0.22.1",
     "posthog-js": "^1.360.0",

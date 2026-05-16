@@ -1,33 +1,28 @@
 /*
  * SafeRoute Varjumine — floating action buttons.
- * Right-side stack: locate, zoom in/out, offline plan.
+ * Right-side stack: locate + offline plan + map style.
+ * (Zoom is handled by pinch on native and the MapLibre NavigationControl on web.)
  * Bottom-centre: large "Find nearest shelter" primary CTA.
  */
 
-import {
-  Crosshair,
-  ListChecks,
-  MapPin,
-  Plus,
-  Minus,
-} from 'lucide-react-native';
+import { Crosshair, Layers, ListChecks, MapPin } from 'lucide-react-native';
 import { Pressable, View } from 'react-native';
 
 import { Text } from '@/components/ui/text';
 
 type StackProps = {
   onLocate: () => void;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
   onOpenPlan: () => void;
+  onToggleStyle: () => void;
+  mapStyleLabel: string;
   bottomInset: number;
 };
 
 export function MapFabStack({
   onLocate,
-  onZoomIn,
-  onZoomOut,
   onOpenPlan,
+  onToggleStyle,
+  mapStyleLabel,
   bottomInset,
 }: StackProps) {
   return (
@@ -50,25 +45,15 @@ export function MapFabStack({
           <ListChecks className="text-foreground" size={22} />
         </Pressable>
 
-        <View className="rounded-2xl bg-card border border-border overflow-hidden">
-          <Pressable
-            onPress={onZoomIn}
-            accessibilityRole="button"
-            accessibilityLabel="Zoom in"
-            className="h-12 w-12 items-center justify-center"
-          >
-            <Plus className="text-foreground" size={22} />
-          </Pressable>
-          <View className="h-px bg-border" />
-          <Pressable
-            onPress={onZoomOut}
-            accessibilityRole="button"
-            accessibilityLabel="Zoom out"
-            className="h-12 w-12 items-center justify-center"
-          >
-            <Minus className="text-foreground" size={22} />
-          </Pressable>
-        </View>
+        <Pressable
+          onPress={onToggleStyle}
+          accessibilityRole="button"
+          accessibilityLabel={`Switch map style, currently ${mapStyleLabel}`}
+          className="h-12 px-3 items-center justify-center rounded-full bg-card border border-border shadow-md flex-row gap-1.5"
+        >
+          <Layers className="text-foreground" size={18} />
+          <Text className="text-foreground text-[11.5px] font-semibold">{mapStyleLabel}</Text>
+        </Pressable>
 
         <Pressable
           onPress={onLocate}
@@ -85,10 +70,11 @@ export function MapFabStack({
 
 type NearestProps = {
   onPress: () => void;
+  loading?: boolean;
   bottomInset: number;
 };
 
-export function FindNearestFab({ onPress, bottomInset }: NearestProps) {
+export function FindNearestFab({ onPress, loading, bottomInset }: NearestProps) {
   return (
     <View
       pointerEvents="box-none"
@@ -105,12 +91,19 @@ export function FindNearestFab({ onPress, bottomInset }: NearestProps) {
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel="Find nearest shelter"
+        disabled={loading}
         className="flex-row items-center gap-2 rounded-full bg-primary px-6 min-h-[56px] shadow-xl active:opacity-90"
-        style={{ shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } }}
+        style={{
+          shadowColor: '#000',
+          shadowOpacity: 0.3,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: 6 },
+          opacity: loading ? 0.7 : 1,
+        }}
       >
         <MapPin color="#ffffff" size={22} />
         <Text className="text-primary-foreground text-[16px] font-semibold">
-          Find nearest shelter
+          {loading ? 'Finding shelter…' : 'Find nearest shelter'}
         </Text>
       </Pressable>
     </View>

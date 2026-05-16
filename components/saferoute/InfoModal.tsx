@@ -58,8 +58,13 @@ export function InfoModal({
                   Demo prototype
                 </Text>
                 <Text className="text-amber-200/90 text-[11.5px] mt-1 leading-[16px]">
-                  This prototype uses hardcoded demo shelters, demo routes, demo map data
-                  and demo danger zones. It does not provide official emergency information.
+                  This prototype uses real interactive map tiles when online
+                  (OpenFreeMap, OSM-based, no API key). Shelter data, danger
+                  zone, and the offline walking graph are hardcoded demo data.
+                  Live routing uses the public OSRM demo endpoint
+                  (router.project-osrm.org); offline routing falls back to a
+                  simplified local Dijkstra over a hand-drawn pedestrian graph.
+                  This is not official emergency information.
                 </Text>
               </View>
 
@@ -88,7 +93,9 @@ export function InfoModal({
               </View>
 
               <Text className="text-[11px] text-muted-foreground mt-3 italic">
-                No login, no backend, no live routing. All data is on this device.
+                No login, no backend. Map tiles load from OpenFreeMap when
+                online; the app shell, shelter data, and walking graph stay on
+                this device.
               </Text>
             </ScrollView>
           </View>
