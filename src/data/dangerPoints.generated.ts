@@ -39,7 +39,7 @@ import type { DangerPoint } from './dangerPoints';
 
 export const generatedDangerPointsSnapshotDate = '2026-05-16';
 
-const DEFAULT_RADIUS = 500;
+const DEFAULT_RADIUS = 200;
 const SNAPSHOT = generatedDangerPointsSnapshotDate;
 
 type Seed = Pick<

@@ -240,6 +240,8 @@ export default function SafeRouteMap({
   userLocationRef.current = userLocation;
   const layerVisibilityRef = useRef(layerVisibility);
   layerVisibilityRef.current = layerVisibility;
+  const crisisModeRef = useRef(crisisMode);
+  crisisModeRef.current = crisisMode;
   const onCenterChangeRef = useRef(onCenterChange);
   onCenterChangeRef.current = onCenterChange;
   const isFirstStyleEffect = useRef(true);
@@ -319,6 +321,7 @@ export default function SafeRouteMap({
       routeCoords: route?.coordinates ?? null,
       userLocation,
       layerVisibility,
+      crisisMode,
     });
   }, [
     shelters,
@@ -332,6 +335,7 @@ export default function SafeRouteMap({
     route,
     userLocation,
     layerVisibility,
+    crisisMode,
   ]);
 
   // Imperative recenter.
@@ -779,6 +783,7 @@ export default function SafeRouteMap({
       routeCoords: currentRoute?.coordinates ?? null,
       userLocation: currentUser,
       layerVisibility: layerVisibilityRef.current,
+      crisisMode: crisisModeRef.current,
     });
   }
 
@@ -800,6 +805,7 @@ export default function SafeRouteMap({
       routeCoords: [number, number][] | null;
       userLocation: { lat: number; lng: number };
       layerVisibility: SafeRouteLayerVisibility;
+      crisisMode: boolean;
     },
   ) {
     const shelterSrc = getGeoJsonSource(map, 'saferoute-shelters');
@@ -887,20 +893,23 @@ export default function SafeRouteMap({
       geometry: { type: 'Point', coordinates: [args.userLocation.lng, args.userLocation.lat] },
     });
 
-    // Layer visibility toggles.
+    // Layer visibility toggles. Danger overlays are additionally gated on
+    // crisis mode — they only appear when the user has explicitly switched
+    // the app into crisis mode (top status bar pill).
     const v = args.layerVisibility;
+    const crisis = args.crisisMode;
     setLayerVisible(map, 'saferoute-shelters-halo', v.shelters);
     setLayerVisible(map, 'saferoute-shelters-circle', v.shelters);
     setLayerVisible(map, 'saferoute-clusters', v.shelters);
     setLayerVisible(map, 'saferoute-cluster-count', v.shelters);
     setLayerVisible(map, 'saferoute-userplaces-halo', v.savedPlaces);
     setLayerVisible(map, 'saferoute-userplaces-square', v.savedPlaces);
-    setLayerVisible(map, 'saferoute-danger-fill', v.danger);
-    setLayerVisible(map, 'saferoute-danger-line', v.danger);
-    setLayerVisible(map, 'saferoute-dangerzones-fill', v.dangerZones);
-    setLayerVisible(map, 'saferoute-dangerzones-line', v.dangerZones);
-    setLayerVisible(map, 'saferoute-dangerpoints-halo', v.dangerPoints);
-    setLayerVisible(map, 'saferoute-dangerpoints-circle', v.dangerPoints);
+    setLayerVisible(map, 'saferoute-danger-fill', v.danger && crisis);
+    setLayerVisible(map, 'saferoute-danger-line', v.danger && crisis);
+    setLayerVisible(map, 'saferoute-dangerzones-fill', v.dangerZones && crisis);
+    setLayerVisible(map, 'saferoute-dangerzones-line', v.dangerZones && crisis);
+    setLayerVisible(map, 'saferoute-dangerpoints-halo', v.dangerPoints && crisis);
+    setLayerVisible(map, 'saferoute-dangerpoints-circle', v.dangerPoints && crisis);
     setLayerVisible(map, 'saferoute-communityshelters-halo', v.communityShelters);
     setLayerVisible(map, 'saferoute-communityshelters-square', v.communityShelters);
   }

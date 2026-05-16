@@ -130,9 +130,9 @@ export const dangerPointLayerNames: Record<
 
 export const dangerZoneConfig = {
   /** Same radius for every Danger Point. We do NOT score by importance. */
-  defaultRadiusMeters: 500,
-  minRadiusMeters: 300,
-  maxRadiusMeters: 750,
+  defaultRadiusMeters: 200,
+  minRadiusMeters: 120,
+  maxRadiusMeters: 300,
   zoneMeaning: 'Public-data proximity caution zone',
   zoneDisclaimer:
     'Generated from public Riigihaldus POI locations. Not a real-time threat zone.',

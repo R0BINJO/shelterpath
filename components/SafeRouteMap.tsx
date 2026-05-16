@@ -139,7 +139,7 @@ export default function SafeRouteMap({
       >
         <UrlTile urlTemplate={TILE_URL} maximumZ={19} flipY={false} />
 
-        {layerVisibility.danger ? (
+        {layerVisibility.danger && crisisMode ? (
           <Circle
             center={{
               latitude: DEMO_DANGER_ZONE.centerLat,
@@ -154,7 +154,7 @@ export default function SafeRouteMap({
 
         {/* PUBLIC-DATA DANGER ZONES — translucent orange/red caution circles
             around each Riigihaldus POI. Not real-time threat areas. */}
-        {layerVisibility.dangerZones
+        {layerVisibility.dangerZones && crisisMode
           ? dangerPoints
               .filter(
                 (p): p is DangerPoint =>
@@ -274,7 +274,7 @@ export default function SafeRouteMap({
           : null}
 
         {/* PUBLIC-DATA DANGER POINTS — orange warning markers. */}
-        {layerVisibility.dangerPoints
+        {layerVisibility.dangerPoints && crisisMode
           ? dangerPoints
               .filter(
                 (p): p is DangerPoint =>
