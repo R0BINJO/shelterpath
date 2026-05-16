@@ -227,12 +227,20 @@ export function AddCommunityShelterSheet({ manualPin }: Props) {
       onRequestClose={() => setAddSheetOpen(false)}
     >
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }}>
-        <Pressable
-          onPress={() => setAddSheetOpen(false)}
-          accessibilityLabel="Dismiss"
-          style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
-        />
-        <SafeAreaView edges={['bottom']} style={{ flex: 1, justifyContent: 'flex-end' }}>
+        <SafeAreaView
+          edges={['bottom']}
+          style={{ flex: 1, justifyContent: 'flex-end' }}
+          pointerEvents="box-none"
+        >
+          {/* Dismiss-on-tap backdrop. Lives ABOVE the sheet in DOM order but
+              uses flex:1 so the sheet (rendered after) sits on top in the
+              vertical stack. Tapping the dim area dismisses; the sheet itself
+              keeps full pointer access for the TextInputs. */}
+          <Pressable
+            onPress={() => setAddSheetOpen(false)}
+            accessibilityLabel="Dismiss"
+            style={{ flex: 1 }}
+          />
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View
               className="bg-card border-t border-x border-border rounded-t-3xl overflow-hidden"
