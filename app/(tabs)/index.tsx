@@ -1,32 +1,30 @@
 /*
  * SafeRoute Varjumine — main map screen (real interactive map).
  *
- * Map renderer (platform-split):
- *   web    → maplibre-gl with OpenFreeMap bright/dark vector tiles
- *   native → react-native-maps with OpenStreetMap raster tiles
+ * Layers (toggleable via chip row):
+ *   - Official shelters (HARDCODED Päästeamet open-data snapshot)
+ *   - USER SAVED PLACES - stored locally in AsyncStorage (private)
+ *   - DEMO DANGER ZONE  (visual only)
  *
- * Shelter dataset: HARDCODED Päästeamet open-data snapshot
- * (src/data/officialShelters.ts). The app does NOT fetch shelter data at
- * runtime.
- *
- * Layout:
- *   - Top status pills (crisis / offline / demo data / info)
- *   - Region filter chips (Near me / Tallinn / Harju / All Estonia)
- *   - Right floating stack (offline plan, map style, locate)
- *   - "Find nearest shelter" CTA
- *   - Bottom sheet with shelter detail + route source + turn-by-turn
- *   - Demo data chips
- *   - Saved-fallback shortcut pill
- *   - Offline plan + info modals
+ * USER SAVED PLACES - stored locally in browser localStorage / AsyncStorage.
+ * DO NOT SEND HOME/WORK/SCHOOL ADDRESSES TO BACKEND.
+ * SAVED PLACES WORK OFFLINE AFTER SAVING.
+ * ADDRESS SEARCH REQUIRES INTERNET.
  */
 
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FindNearestFab, MapFabStack } from '@/components/saferoute/FloatingControls';
 import { InfoModal } from '@/components/saferoute/InfoModal';
+import { LayerToggleChips } from '@/components/saferoute/LayerToggleChips';
 import { OfflinePlanModal } from '@/components/saferoute/OfflinePlanModal';
+import { AddPlaceSheet } from '@/components/saferoute/AddPlaceSheet';
+import {
+  SavedPlaceBottomSheet,
+  SavedPlacesPanel,
+} from '@/components/saferoute/SavedPlacesSheet';
 import SafeRouteMap from '@/components/SafeRouteMap';
 import { ShelterSheet } from '@/components/saferoute/ShelterSheet';
 import { TopStatusBar } from '@/components/saferoute/TopStatusBar';
@@ -46,6 +44,7 @@ const REGION_OPTIONS: { value: ShelterRegion; label: string }[] = [
 export default function MapScreen() {
   const {
     selectedShelterId,
+    selectedUserPlaceId,
     showRoute,
     crisisMode,
     offlineMode,
@@ -61,7 +60,12 @@ export default function MapScreen() {
     routeError,
     recenterToken,
     fitRouteToken,
+    userPlaces,
+    addPlaceSheet,
+    savedPlacesPanelOpen,
+    layerVisibility,
     selectShelter,
+    selectUserPlace,
     navigateToShelter,
     findNearest,
     toggleCrisisMode,
@@ -74,9 +78,32 @@ export default function MapScreen() {
     bumpRecenter,
     saveFallback,
     clearRoute,
+    loadUserPlaces,
+    openAddPlace,
+    setSavedPlacesPanelOpen,
+    toggleLayer,
   } = useSafeRouteStore();
 
-  // Region-filtered shelters for the map view.
+  // Manual-pin and flyTo plumbing — owned by this screen, passed down to map.
+  const [manualPinMode, setManualPinMode] = useState(false);
+  const mapCenterRef = useRef<{ lat: number; lng: number }>(userLocation);
+  const [flyToTarget, setFlyToTarget] = useState<{ lat: number; lng: number } | null>(
+    null,
+  );
+  const [flyToToken, setFlyToToken] = useState(0);
+
+  const manualPinHandle = useMemo(
+    () => ({
+      setManualPinMode,
+      getMapCenter: () => mapCenterRef.current,
+      flyTo: (target: { lat: number; lng: number }) => {
+        setFlyToTarget(target);
+        setFlyToToken((t) => t + 1);
+      },
+    }),
+    [],
+  );
+
   const visibleShelters = useMemo<Shelter[]>(
     () => filterShelters(region, isLiveUserLocation ? userLocation : undefined),
     [region, isLiveUserLocation, userLocation],
@@ -84,20 +111,25 @@ export default function MapScreen() {
 
   const selectedShelter: Shelter | null = useMemo(() => {
     if (selectedShelterId === null) return null;
-    // Look up in the full dataset, not just visible — so saved/selected shelters
-    // outside the active filter still resolve.
     return SHELTERS.find((s) => s.id === selectedShelterId) ?? null;
   }, [selectedShelterId]);
 
+  const selectedUserPlace = useMemo(() => {
+    if (!selectedUserPlaceId) return null;
+    return userPlaces.find((p) => p.id === selectedUserPlaceId) ?? null;
+  }, [selectedUserPlaceId, userPlaces]);
+
   const isSelectedSaved = useMemo(() => {
     if (!selectedShelter) return false;
-    return Object.values(fallbacks).some(
-      (f) => f?.shelterId === selectedShelter.id,
-    );
+    return Object.values(fallbacks).some((f) => f?.shelterId === selectedShelter.id);
   }, [fallbacks, selectedShelter]);
 
-  // Try browser geolocation once on web for the "Using device location" label
-  // and to enable a useful "Near me" default.
+  // Load saved places once on mount.
+  useEffect(() => {
+    void loadUserPlaces();
+  }, [loadUserPlaces]);
+
+  // Try browser geolocation once on web.
   useEffect(() => {
     if (Platform.OS !== 'web') return undefined;
     if (typeof navigator === 'undefined' || !navigator.geolocation) return undefined;
@@ -127,6 +159,13 @@ export default function MapScreen() {
     [selectShelter],
   );
 
+  const handleSelectUserPlace = useCallback(
+    (p: { id: string }) => {
+      selectUserPlace(p.id);
+    },
+    [selectUserPlace],
+  );
+
   const handleFindNearest = useCallback(() => {
     void findNearest();
   }, [findNearest]);
@@ -153,19 +192,33 @@ export default function MapScreen() {
     setMapStyle(mapStyle === 'bright' ? 'dark' : 'bright');
   }, [mapStyle, setMapStyle]);
 
+  const handleCenterChange = useCallback((c: { lat: number; lng: number }) => {
+    mapCenterRef.current = c;
+  }, []);
+
+  const savedPlacesCount = userPlaces.length;
+
   return (
     <View className="flex-1 bg-background">
       <SafeRouteMap
         shelters={visibleShelters}
         selectedShelterId={selectedShelterId}
+        userPlaces={userPlaces}
+        selectedUserPlaceId={selectedUserPlaceId}
         route={route}
         userLocation={userLocation}
         isLiveUserLocation={isLiveUserLocation}
         crisisMode={crisisMode}
         mapStyle={mapStyle}
+        layerVisibility={layerVisibility}
+        manualPinMode={manualPinMode}
         onSelectShelter={handleSelectShelter}
+        onSelectUserPlace={handleSelectUserPlace}
+        onCenterChange={handleCenterChange}
         recenterToken={recenterToken}
         fitRouteToken={fitRouteToken}
+        flyToTarget={flyToTarget}
+        flyToToken={flyToToken}
       />
 
       {/* Persistent demo + data-source chips bottom-centre */}
@@ -200,6 +253,11 @@ export default function MapScreen() {
               Päästeamet data snapshot · {visibleShelters.length} shelters
             </Text>
           </View>
+          <View className="rounded-full bg-purple-500/15 border border-purple-500/40 px-2.5 py-1">
+            <Text className="text-[10.5px] font-semibold text-purple-300">
+              {savedPlacesCount} saved place{savedPlacesCount === 1 ? '' : 's'} · offline ready
+            </Text>
+          </View>
         </View>
       </SafeAreaView>
 
@@ -211,7 +269,7 @@ export default function MapScreen() {
         onOpenInfo={() => setInfoOpen(true)}
       />
 
-      {/* Region filter chips, sitting just below the top status bar */}
+      {/* Region filter + layer toggles */}
       <SafeAreaView
         edges={['top']}
         pointerEvents="box-none"
@@ -247,6 +305,10 @@ export default function MapScreen() {
             );
           })}
         </ScrollView>
+
+        <View className="px-3 mt-1.5">
+          <LayerToggleChips layers={layerVisibility} onToggle={toggleLayer} />
+        </View>
       </SafeAreaView>
 
       {/* Persistent disclaimer */}
@@ -259,7 +321,7 @@ export default function MapScreen() {
           zIndex: 12,
         }}
       >
-        <View className="rounded-xl bg-card/90 border border-border px-2.5 py-1.5 max-w-[240px]">
+        <View className="rounded-xl bg-card/90 border border-border px-2.5 py-1.5 max-w-[260px]">
           <Text className="text-[10.5px] text-muted-foreground leading-[14px]">
             SafeRoute is a civilian preparedness assistant, not an official
             emergency system. Always follow official instructions.
@@ -271,15 +333,18 @@ export default function MapScreen() {
         onLocate={handleLocate}
         onOpenPlan={() => setOfflinePlanOpen(true)}
         onToggleStyle={handleToggleStyle}
+        onOpenSavedPlaces={() => setSavedPlacesPanelOpen(true)}
+        onAddPlace={() => openAddPlace()}
         mapStyleLabel={crisisMode ? 'Dark' : mapStyle === 'bright' ? 'Bright' : 'Dark'}
+        savedPlacesCount={savedPlacesCount}
         bottomInset={Platform.select({ web: 150, default: 170 }) ?? 170}
       />
 
       {/* Saved fallback shortcut pill */}
-      {!selectedShelter && Object.keys(fallbacks).length > 0 ? (
+      {!selectedShelter && !selectedUserPlace && Object.keys(fallbacks).length > 0 ? (
         <View
           pointerEvents="box-none"
-          style={{ position: 'absolute', left: 12, top: 140, zIndex: 14 }}
+          style={{ position: 'absolute', left: 12, top: 178, zIndex: 14 }}
         >
           <Pressable
             onPress={() => setOfflinePlanOpen(true)}
@@ -295,11 +360,13 @@ export default function MapScreen() {
         </View>
       ) : null}
 
-      <FindNearestFab
-        onPress={handleFindNearest}
-        loading={routeState === 'loading'}
-        bottomInset={Platform.select({ web: 70, default: 80 }) ?? 80}
-      />
+      {!selectedShelter && !selectedUserPlace ? (
+        <FindNearestFab
+          onPress={handleFindNearest}
+          loading={routeState === 'loading'}
+          bottomInset={Platform.select({ web: 70, default: 80 }) ?? 80}
+        />
+      ) : null}
 
       <ShelterSheet
         shelter={selectedShelter}
@@ -313,11 +380,29 @@ export default function MapScreen() {
         onSaveFallback={handleSaveFallback}
       />
 
+      <SavedPlaceBottomSheet
+        place={selectedUserPlace}
+        onClose={() => selectUserPlace(null)}
+      />
+
       <OfflinePlanModal
         visible={offlinePlanOpen}
         onClose={() => setOfflinePlanOpen(false)}
       />
+      <SavedPlacesPanel
+        visible={savedPlacesPanelOpen}
+        onClose={() => setSavedPlacesPanelOpen(false)}
+        onFlyTo={(t) => {
+          setFlyToTarget(t);
+          setFlyToToken((tok) => tok + 1);
+        }}
+      />
+      <AddPlaceSheet manualPin={manualPinHandle} />
       <InfoModal visible={infoOpen} onClose={() => setInfoOpen(false)} />
+
+      {/* When the AddPlace sheet is in manual-pin mode, we hide the sheet via
+          its internal stage. The crosshair overlay is rendered by the map. */}
+      {addPlaceSheet.open ? null : null}
     </View>
   );
 }

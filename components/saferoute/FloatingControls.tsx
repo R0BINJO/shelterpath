@@ -1,11 +1,19 @@
 /*
  * SafeRoute Varjumine — floating action buttons.
- * Right-side stack: locate + offline plan + map style.
+ *
+ * Right-side stack: locate + offline plan + map style + saved places + add place.
  * (Zoom is handled by pinch on native and the MapLibre NavigationControl on web.)
  * Bottom-centre: large "Find nearest shelter" primary CTA.
  */
 
-import { Crosshair, Layers, ListChecks, MapPin } from 'lucide-react-native';
+import {
+  Bookmark,
+  Crosshair,
+  Layers,
+  ListChecks,
+  MapPin,
+  Plus,
+} from 'lucide-react-native';
 import { Pressable, View } from 'react-native';
 
 import { Text } from '@/components/ui/text';
@@ -14,7 +22,10 @@ type StackProps = {
   onLocate: () => void;
   onOpenPlan: () => void;
   onToggleStyle: () => void;
+  onOpenSavedPlaces: () => void;
+  onAddPlace: () => void;
   mapStyleLabel: string;
+  savedPlacesCount: number;
   bottomInset: number;
 };
 
@@ -22,7 +33,10 @@ export function MapFabStack({
   onLocate,
   onOpenPlan,
   onToggleStyle,
+  onOpenSavedPlaces,
+  onAddPlace,
   mapStyleLabel,
+  savedPlacesCount,
   bottomInset,
 }: StackProps) {
   return (
@@ -36,6 +50,30 @@ export function MapFabStack({
       }}
     >
       <View className="gap-2.5 items-end">
+        <Pressable
+          onPress={onAddPlace}
+          accessibilityRole="button"
+          accessibilityLabel="Add a saved place"
+          className="h-12 px-3 items-center justify-center rounded-full bg-primary shadow-md flex-row gap-1.5"
+        >
+          <Plus color="#ffffff" size={18} />
+          <Text className="text-primary-foreground text-[12px] font-semibold">
+            Add place
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={onOpenSavedPlaces}
+          accessibilityRole="button"
+          accessibilityLabel="Open saved places"
+          className="h-12 px-3 items-center justify-center rounded-full bg-card border border-border shadow-md flex-row gap-1.5"
+        >
+          <Bookmark className="text-foreground" size={18} />
+          <Text className="text-foreground text-[12px] font-semibold">
+            Saved {savedPlacesCount > 0 ? `· ${savedPlacesCount}` : ''}
+          </Text>
+        </Pressable>
+
         <Pressable
           onPress={onOpenPlan}
           accessibilityRole="button"

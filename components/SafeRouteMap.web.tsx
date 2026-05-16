@@ -5,15 +5,14 @@
  *   - bright style: https://tiles.openfreemap.org/styles/bright
  *   - dark   style: https://tiles.openfreemap.org/styles/dark
  *
- * PRODUCTION OFFLINE MAP TODO: replace the online style with a local PMTiles
- * file (e.g. /maps/estonia.pmtiles). Sketch:
+ * Map layers:
+ *   - saferoute-danger     (HARDCODED DEMO DANGER ZONE)
+ *   - saferoute-route      (active route polyline)
+ *   - saferoute-user       (user location dot + halo)
+ *   - saferoute-shelters   (official Päästeamet snapshot, green SA3)
+ *   - saferoute-userplaces (USER SAVED PLACES — local-only, type-coloured)
  *
- *   import maplibregl from 'maplibre-gl';
- *   import { Protocol } from 'pmtiles';
- *   const protocol = new Protocol();
- *   maplibregl.addProtocol('pmtiles', protocol.tile);
- *
- * Do NOT bulk-download OpenStreetMap raster tiles in production.
+ * PRODUCTION OFFLINE MAP TODO: replace the online style with a local PMTiles file.
  */
 
 import maplibregl, {
@@ -27,19 +26,22 @@ import { View } from 'react-native';
 
 import { SHELTER_COLORS } from '@/lib/constants';
 import { DEMO_DANGER_ZONE, type Shelter } from '@/lib/shelters';
+import { USER_PLACE_TYPE_META, type UserPlace } from '@/src/types/userPlaces';
 
-import type { SafeRouteMapProps, SafeRouteMapStyle } from './SafeRouteMap.types';
+import type {
+  SafeRouteLayerVisibility,
+  SafeRouteMapProps,
+  SafeRouteMapStyle,
+} from './SafeRouteMap.types';
 
 const STYLE_URLS: Record<SafeRouteMapStyle, string> = {
   bright: 'https://tiles.openfreemap.org/styles/bright',
   dark: 'https://tiles.openfreemap.org/styles/dark',
 };
 
-// Estonia bounding box (loose) — gives users freedom to pan across the country
-// without losing context.
 const ESTONIA_BOUNDS: LngLatBoundsLike = [
-  [21.5, 57.4], // SW
-  [28.4, 59.9], // NE
+  [21.5, 57.4],
+  [28.4, 59.9],
 ];
 
 function dangerCirclePolygon(): GeoJSON.Feature<GeoJSON.Polygon> {
@@ -82,6 +84,24 @@ function sheltersToGeoJson(
   };
 }
 
+function userPlacesToGeoJson(
+  places: readonly UserPlace[],
+): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  return {
+    type: 'FeatureCollection',
+    features: places.map((p) => ({
+      type: 'Feature',
+      properties: {
+        id: p.id,
+        label: p.label,
+        type: p.type,
+        color: USER_PLACE_TYPE_META[p.type].color,
+      },
+      geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+    })),
+  };
+}
+
 function routeFeature(coords: [number, number][]): GeoJSON.Feature<GeoJSON.LineString> {
   return {
     type: 'Feature',
@@ -90,31 +110,54 @@ function routeFeature(coords: [number, number][]): GeoJSON.Feature<GeoJSON.LineS
   };
 }
 
+function setLayerVisible(map: MaplibreMap, id: string, visible: boolean) {
+  if (!map.getLayer(id)) return;
+  map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+}
+
 export default function SafeRouteMap({
   shelters,
   selectedShelterId,
+  userPlaces,
+  selectedUserPlaceId,
   route,
   userLocation,
   isLiveUserLocation,
   crisisMode,
   mapStyle,
+  layerVisibility,
+  manualPinMode,
   onSelectShelter,
+  onSelectUserPlace,
   recenterToken,
   fitRouteToken,
+  flyToToken,
+  flyToTarget,
+  onCenterChange,
 }: SafeRouteMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
   const styleLoadedRef = useRef(false);
-  const onSelectRef = useRef(onSelectShelter);
-  onSelectRef.current = onSelectShelter;
+  const onSelectShelterRef = useRef(onSelectShelter);
+  onSelectShelterRef.current = onSelectShelter;
+  const onSelectUserPlaceRef = useRef(onSelectUserPlace);
+  onSelectUserPlaceRef.current = onSelectUserPlace;
   const sheltersRef = useRef(shelters);
   sheltersRef.current = shelters;
   const selectedRef = useRef(selectedShelterId);
   selectedRef.current = selectedShelterId;
+  const userPlacesRef = useRef(userPlaces);
+  userPlacesRef.current = userPlaces;
+  const selectedUserPlaceRef = useRef(selectedUserPlaceId);
+  selectedUserPlaceRef.current = selectedUserPlaceId;
   const routeRef = useRef(route);
   routeRef.current = route;
   const userLocationRef = useRef(userLocation);
   userLocationRef.current = userLocation;
+  const layerVisibilityRef = useRef(layerVisibility);
+  layerVisibilityRef.current = layerVisibility;
+  const onCenterChangeRef = useRef(onCenterChange);
+  onCenterChangeRef.current = onCenterChange;
   const isFirstStyleEffect = useRef(true);
 
   useEffect(() => {
@@ -143,15 +186,17 @@ export default function SafeRouteMap({
       'top-right',
     );
 
-    // `style.load` fires once per style load (initial + every setStyle).
-    // It's more reliable than `styledata`, which can fire many times during a
-    // style transition with `isStyleLoaded()` flipping mid-stream.
     const handleStyleLoad = () => {
       styleLoadedRef.current = true;
       attachLayers(map);
     };
     map.on('load', handleStyleLoad);
     map.on('style.load', handleStyleLoad);
+
+    map.on('move', () => {
+      const c = map.getCenter();
+      onCenterChangeRef.current?.({ lat: c.lat, lng: c.lng });
+    });
 
     mapRef.current = map;
     return () => {
@@ -162,35 +207,40 @@ export default function SafeRouteMap({
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- init-once effect
   }, []);
 
-  // Switch style when crisis mode / map style flips. Mark style as unloaded
-  // so the data-update effect skips until `style.load` re-attaches sources.
+  // Switch style when crisis mode / map style flips.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    // Skip the very first run — the initial style is set at construction time.
     if (isFirstStyleEffect.current) {
       isFirstStyleEffect.current = false;
       return;
     }
     styleLoadedRef.current = false;
-    // `diff: false` forces a full rebuild so custom sources/layers we added
-    // imperatively (shelters / route / user / danger) are guaranteed to be
-    // wiped. We re-attach them inside the `style.load` handler — that single
-    // event reliably fires once the new style is fully loaded.
     map.setStyle(STYLE_URLS[crisisMode ? 'dark' : mapStyle], { diff: false });
   }, [crisisMode, mapStyle]);
 
-  // Push data updates whenever shelters / route / selection / user-location change.
+  // Data updates.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !styleLoadedRef.current) return;
     updateData(map, {
       shelters,
       selectedShelterId,
+      userPlaces,
+      selectedUserPlaceId,
       routeCoords: route?.coordinates ?? null,
       userLocation,
+      layerVisibility,
     });
-  }, [shelters, selectedShelterId, route, userLocation]);
+  }, [
+    shelters,
+    selectedShelterId,
+    userPlaces,
+    selectedUserPlaceId,
+    route,
+    userLocation,
+    layerVisibility,
+  ]);
 
   // Imperative recenter.
   useEffect(() => {
@@ -198,6 +248,13 @@ export default function SafeRouteMap({
     if (!map || recenterToken === undefined) return;
     map.easeTo({ center: [userLocation.lng, userLocation.lat], zoom: 14, duration: 600 });
   }, [recenterToken, userLocation]);
+
+  // Imperative flyTo (used to preview a geocoded address).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || flyToToken === undefined || !flyToTarget) return;
+    map.flyTo({ center: [flyToTarget.lng, flyToTarget.lat], zoom: 16, duration: 700 });
+  }, [flyToToken, flyToTarget]);
 
   // Imperative fit-to-route.
   useEffect(() => {
@@ -219,6 +276,8 @@ export default function SafeRouteMap({
   function attachLayers(map: MaplibreMap) {
     const currentShelters = sheltersRef.current;
     const currentSelected = selectedRef.current;
+    const currentUserPlaces = userPlacesRef.current;
+    const currentSelectedUserPlace = selectedUserPlaceRef.current;
     const currentRoute = routeRef.current;
     const currentUser = userLocationRef.current;
 
@@ -304,7 +363,6 @@ export default function SafeRouteMap({
         clusterMaxZoom: 12,
       });
 
-      // Cluster bubbles
       map.addLayer({
         id: 'saferoute-clusters',
         type: 'circle',
@@ -341,7 +399,6 @@ export default function SafeRouteMap({
         paint: { 'text-color': '#0b1320' },
       });
 
-      // Unclustered individual shelters
       map.addLayer({
         id: 'saferoute-shelters-halo',
         type: 'circle',
@@ -393,7 +450,7 @@ export default function SafeRouteMap({
         if (!f) return;
         const id = String(f.properties?.id ?? '');
         const found = sheltersRef.current.find((s) => s.id === id);
-        if (found) onSelectRef.current(found);
+        if (found) onSelectShelterRef.current(found);
       });
       map.on('mouseenter', 'saferoute-shelters-circle', () => {
         map.getCanvas().style.cursor = 'pointer';
@@ -409,17 +466,74 @@ export default function SafeRouteMap({
       });
     }
 
+    // USER SAVED PLACES layer — different marker shape (diamond-ish square with
+    // outline) so it visually contrasts with the round green shelter dots.
+    if (!map.getSource('saferoute-userplaces')) {
+      map.addSource('saferoute-userplaces', {
+        type: 'geojson',
+        data: userPlacesToGeoJson(currentUserPlaces),
+      });
+
+      map.addLayer({
+        id: 'saferoute-userplaces-halo',
+        type: 'circle',
+        source: 'saferoute-userplaces',
+        paint: {
+          'circle-radius': [
+            'case',
+            ['==', ['get', 'id'], currentSelectedUserPlace ?? ''],
+            22,
+            0,
+          ],
+          'circle-color': ['get', 'color'],
+          'circle-opacity': 0.3,
+        },
+      });
+      map.addLayer({
+        id: 'saferoute-userplaces-square',
+        type: 'circle',
+        source: 'saferoute-userplaces',
+        paint: {
+          'circle-radius': [
+            'case',
+            ['==', ['get', 'id'], currentSelectedUserPlace ?? ''],
+            13,
+            10,
+          ],
+          'circle-color': ['get', 'color'],
+          'circle-stroke-color': '#0b1320',
+          'circle-stroke-width': 3,
+        },
+      });
+
+      map.on('click', 'saferoute-userplaces-square', (e) => {
+        const f = e.features?.[0];
+        if (!f) return;
+        const id = String(f.properties?.id ?? '');
+        const found = userPlacesRef.current.find((p) => p.id === id);
+        if (found) onSelectUserPlaceRef.current(found);
+      });
+      map.on('mouseenter', 'saferoute-userplaces-square', () => {
+        map.getCanvas().style.cursor = 'pointer';
+      });
+      map.on('mouseleave', 'saferoute-userplaces-square', () => {
+        map.getCanvas().style.cursor = '';
+      });
+    }
+
     updateData(map, {
       shelters: currentShelters,
       selectedShelterId: currentSelected,
+      userPlaces: currentUserPlaces,
+      selectedUserPlaceId: currentSelectedUserPlace,
       routeCoords: currentRoute?.coordinates ?? null,
       userLocation: currentUser,
+      layerVisibility: layerVisibilityRef.current,
     });
   }
 
   function getGeoJsonSource(map: MaplibreMap, id: string): maplibregl.GeoJSONSource | undefined {
-    const src = map.getSource(id);
-    return src as maplibregl.GeoJSONSource | undefined;
+    return map.getSource(id) as maplibregl.GeoJSONSource | undefined;
   }
 
   function updateData(
@@ -427,8 +541,11 @@ export default function SafeRouteMap({
     args: {
       shelters: readonly Shelter[];
       selectedShelterId: string | null;
+      userPlaces: readonly UserPlace[];
+      selectedUserPlaceId: string | null;
       routeCoords: [number, number][] | null;
       userLocation: { lat: number; lng: number };
+      layerVisibility: SafeRouteLayerVisibility;
     },
   ) {
     const shelterSrc = getGeoJsonSource(map, 'saferoute-shelters');
@@ -448,6 +565,23 @@ export default function SafeRouteMap({
       ]);
     }
 
+    const userPlacesSrc = getGeoJsonSource(map, 'saferoute-userplaces');
+    userPlacesSrc?.setData(userPlacesToGeoJson(args.userPlaces));
+    if (map.getLayer('saferoute-userplaces-halo')) {
+      map.setPaintProperty('saferoute-userplaces-halo', 'circle-radius', [
+        'case',
+        ['==', ['get', 'id'], args.selectedUserPlaceId ?? ''],
+        22,
+        0,
+      ]);
+      map.setPaintProperty('saferoute-userplaces-square', 'circle-radius', [
+        'case',
+        ['==', ['get', 'id'], args.selectedUserPlaceId ?? ''],
+        13,
+        10,
+      ]);
+    }
+
     const routeSrc = getGeoJsonSource(map, 'saferoute-route');
     if (routeSrc) {
       const data: GeoJSON.FeatureCollection<GeoJSON.LineString> = args.routeCoords
@@ -462,16 +596,71 @@ export default function SafeRouteMap({
       properties: {},
       geometry: { type: 'Point', coordinates: [args.userLocation.lng, args.userLocation.lat] },
     });
+
+    // Layer visibility toggles.
+    const v = args.layerVisibility;
+    setLayerVisible(map, 'saferoute-shelters-halo', v.shelters);
+    setLayerVisible(map, 'saferoute-shelters-circle', v.shelters);
+    setLayerVisible(map, 'saferoute-clusters', v.shelters);
+    setLayerVisible(map, 'saferoute-cluster-count', v.shelters);
+    setLayerVisible(map, 'saferoute-userplaces-halo', v.savedPlaces);
+    setLayerVisible(map, 'saferoute-userplaces-square', v.savedPlaces);
+    setLayerVisible(map, 'saferoute-danger-fill', v.danger);
+    setLayerVisible(map, 'saferoute-danger-line', v.danger);
   }
 
   void isLiveUserLocation;
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, position: 'relative' }}>
       <div
         ref={containerRef}
         style={{ width: '100%', height: '100%', minHeight: 200 }}
       />
+      {manualPinMode ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <View
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 16,
+              borderWidth: 3,
+              borderColor: '#ffffff',
+              backgroundColor: '#a855f7',
+              shadowColor: '#000',
+              shadowOpacity: 0.35,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 4 },
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              width: 2,
+              height: 56,
+              top: '50%',
+              backgroundColor: 'rgba(255,255,255,0.5)',
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              height: 2,
+              width: 56,
+              left: '50%',
+              backgroundColor: 'rgba(255,255,255,0.5)',
+            }}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }

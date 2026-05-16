@@ -111,6 +111,19 @@ export function InfoModal({
                 </View>
               </View>
 
+              <View className="mt-3 rounded-xl bg-purple-500/15 border border-purple-500/40 px-3 py-2.5">
+                <Text className="text-purple-300 text-[12px] font-semibold">
+                  Saved places (private)
+                </Text>
+                <Text className="text-purple-200/90 text-[11.5px] mt-1 leading-[16px]">
+                  Official shelters come from a hardcoded Päästeamet data
+                  snapshot. Saved places (home, work, school, family, other)
+                  are private user-created locations stored locally on this
+                  device. SafeRoute does not send them to any backend, does
+                  not log in, and does not sync.
+                </Text>
+              </View>
+
               <Text className="text-[11px] text-muted-foreground mt-3 italic">
                 No login, no backend. Shelter data, the danger zone, and the
                 offline fallback graph are bundled with the app and remain on

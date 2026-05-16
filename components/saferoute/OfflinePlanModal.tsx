@@ -12,7 +12,7 @@
  * "Last downloaded map" is a HARDCODED demo timestamp — no real tiles are stored.
  */
 
-import { Briefcase, Bookmark, GraduationCap, Home, Users, X } from 'lucide-react-native';
+import { Briefcase, Bookmark, GraduationCap, Home, Plus, Users, X } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,6 +29,7 @@ import {
   type SavedFallback,
   useSafeRouteStore,
 } from '@/lib/saferouteStore';
+import { USER_PLACE_TYPE_META } from '@/src/types/userPlaces';
 
 type SlotMeta = {
   slot: FallbackSlot;
@@ -143,10 +144,12 @@ export function OfflinePlanModal({
     familyMeetingPoint,
     emergencyNotes,
     userLocation,
+    userPlaces,
     saveFallback,
     clearFallback,
     setFamilyMeetingPoint,
     setEmergencyNotes,
+    openAddPlace,
   } = useSafeRouteStore();
 
   const [query, setQuery] = useState('');
@@ -245,6 +248,67 @@ export function OfflinePlanModal({
                   onClear={() => clearFallback(meta.slot)}
                 />
               ))}
+
+              <View className="flex-row items-center justify-between mt-3 mb-2">
+                <Text className="text-muted-foreground text-[11px] uppercase tracking-wider">
+                  Saved places (private)
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    onClose();
+                    openAddPlace();
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add a saved place"
+                  className="flex-row items-center gap-1 rounded-full bg-primary px-2.5 py-1 min-h-[28px]"
+                >
+                  <Plus color="#ffffff" size={12} />
+                  <Text className="text-primary-foreground text-[10.5px] font-semibold">
+                    Add place
+                  </Text>
+                </Pressable>
+              </View>
+
+              {userPlaces.length === 0 ? (
+                <View className="rounded-xl bg-secondary/40 border border-border px-3 py-3 mb-2">
+                  <Text className="text-muted-foreground text-[11.5px]">
+                    Add home, work, or school while online to make offline
+                    planning easier.
+                  </Text>
+                </View>
+              ) : (
+                userPlaces.map((p) => {
+                  const meta = USER_PLACE_TYPE_META[p.type];
+                  return (
+                    <View
+                      key={p.id}
+                      className="rounded-xl border border-border bg-secondary/40 px-3 py-2.5 mb-2 flex-row items-center gap-2"
+                    >
+                      <View
+                        className="h-7 w-7 items-center justify-center rounded-full"
+                        style={{
+                          backgroundColor: meta.color + '33',
+                          borderWidth: 1,
+                          borderColor: meta.color,
+                        }}
+                      >
+                        <Bookmark color={meta.color} size={14} />
+                      </View>
+                      <View className="flex-1">
+                        <Text className="text-foreground text-[12.5px] font-semibold" numberOfLines={1}>
+                          {p.label}
+                        </Text>
+                        <Text className="text-muted-foreground text-[11px]" numberOfLines={1}>
+                          {p.address}
+                        </Text>
+                      </View>
+                      <Text className="text-muted-foreground/80 text-[10px]">
+                        {meta.label}
+                      </Text>
+                    </View>
+                  );
+                })
+              )}
 
               <Text className="text-muted-foreground text-[11px] uppercase tracking-wider mt-3 mb-2">
                 Family meeting point
