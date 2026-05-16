@@ -4,6 +4,9 @@
  * Layers (toggleable via chip row):
  *   - Official shelters (HARDCODED Päästeamet open-data snapshot)
  *   - USER SAVED PLACES - stored locally in AsyncStorage (private)
+ *   - DANGER POINTS / DANGER ZONES (HARDCODED DANGER POINT DATA SNAPSHOT
+ *     from Maa- ja Ruumiamet X-GIS Huvipunktid / Riigihaldus, GENERATED
+ *     PUBLIC-DATA PROXIMITY DANGER ZONES — NOT OFFICIAL ALERTS)
  *   - DEMO DANGER ZONE  (visual only)
  *
  * USER SAVED PLACES - stored locally in browser localStorage / AsyncStorage.
@@ -16,6 +19,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { DangerLayerFilterChips } from '@/components/saferoute/DangerLayerFilterChips';
+import { DangerPointSheet } from '@/components/saferoute/DangerPointSheet';
 import { FindNearestFab, MapFabStack } from '@/components/saferoute/FloatingControls';
 import { InfoModal } from '@/components/saferoute/InfoModal';
 import { LayerToggleChips } from '@/components/saferoute/LayerToggleChips';
@@ -32,6 +37,10 @@ import { Text } from '@/components/ui/text';
 import { useSafeRouteStore } from '@/lib/saferouteStore';
 import { SHELTERS, type Shelter } from '@/lib/shelters';
 import { cn } from '@/lib/utils';
+import {
+  dangerPoints as ALL_DANGER_POINTS,
+  type DangerPoint,
+} from '@/src/data/dangerPoints';
 import { filterShelters, type ShelterRegion } from '@/src/data/officialShelters';
 
 const REGION_OPTIONS: { value: ShelterRegion; label: string }[] = [
@@ -45,6 +54,7 @@ export default function MapScreen() {
   const {
     selectedShelterId,
     selectedUserPlaceId,
+    selectedDangerPointId,
     showRoute,
     crisisMode,
     offlineMode,
@@ -52,21 +62,26 @@ export default function MapScreen() {
     infoOpen,
     region,
     fallbacks,
+    fallbackDangerPoint,
     userLocation,
     isLiveUserLocation,
     mapStyle,
     route,
     routeState,
     routeError,
+    routeDangerHits,
     recenterToken,
     fitRouteToken,
     userPlaces,
     addPlaceSheet,
     savedPlacesPanelOpen,
     layerVisibility,
+    dangerLayerFilter,
     selectShelter,
     selectUserPlace,
+    selectDangerPoint,
     navigateToShelter,
+    navigateToDangerPoint,
     findNearest,
     toggleCrisisMode,
     toggleOfflineMode,
@@ -77,11 +92,13 @@ export default function MapScreen() {
     setUserLocation,
     bumpRecenter,
     saveFallback,
+    saveFallbackDangerPoint,
     clearRoute,
     loadUserPlaces,
     openAddPlace,
     setSavedPlacesPanelOpen,
     toggleLayer,
+    setDangerLayerFilter,
   } = useSafeRouteStore();
 
   // Manual-pin and flyTo plumbing — owned by this screen, passed down to map.
@@ -118,6 +135,24 @@ export default function MapScreen() {
     if (!selectedUserPlaceId) return null;
     return userPlaces.find((p) => p.id === selectedUserPlaceId) ?? null;
   }, [selectedUserPlaceId, userPlaces]);
+
+  // Apply the per-layer filter (All / Administratiivkeskus / Politseiasutus / …).
+  const visibleDangerPoints = useMemo<readonly DangerPoint[]>(() => {
+    if (dangerLayerFilter === 'all') return ALL_DANGER_POINTS;
+    return ALL_DANGER_POINTS.filter((p) => p.layerId === dangerLayerFilter);
+  }, [dangerLayerFilter]);
+
+  const selectedDangerPoint = useMemo<DangerPoint | null>(() => {
+    if (!selectedDangerPointId) return null;
+    return ALL_DANGER_POINTS.find((p) => p.id === selectedDangerPointId) ?? null;
+  }, [selectedDangerPointId]);
+
+  const isSelectedDangerPointSaved = useMemo(() => {
+    if (!selectedDangerPoint) return false;
+    return (
+      fallbackDangerPoint?.fallbackDangerPointId === selectedDangerPoint.id
+    );
+  }, [fallbackDangerPoint, selectedDangerPoint]);
 
   const isSelectedSaved = useMemo(() => {
     if (!selectedShelter) return false;
@@ -166,6 +201,34 @@ export default function MapScreen() {
     [selectUserPlace],
   );
 
+  const handleSelectDangerPoint = useCallback(
+    (p: DangerPoint) => {
+      selectDangerPoint(p.id);
+    },
+    [selectDangerPoint],
+  );
+
+  const handleNavigateDangerPoint = useCallback(() => {
+    if (selectedDangerPoint) void navigateToDangerPoint(selectedDangerPoint);
+  }, [navigateToDangerPoint, selectedDangerPoint]);
+
+  const handleSaveFallbackDangerPoint = useCallback(() => {
+    if (selectedDangerPoint) saveFallbackDangerPoint(selectedDangerPoint);
+  }, [saveFallbackDangerPoint, selectedDangerPoint]);
+
+  const handleCopyCoords = useCallback((lat: number, lng: number) => {
+    const text = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+      void navigator.clipboard.writeText(text);
+    }
+    // On native we don't add a new dep; silently no-op rather than mis-claim.
+  }, []);
+
+  const handleCloseDangerPoint = useCallback(() => {
+    selectDangerPoint(null);
+    clearRoute();
+  }, [clearRoute, selectDangerPoint]);
+
   const handleFindNearest = useCallback(() => {
     void findNearest();
   }, [findNearest]);
@@ -205,6 +268,8 @@ export default function MapScreen() {
         selectedShelterId={selectedShelterId}
         userPlaces={userPlaces}
         selectedUserPlaceId={selectedUserPlaceId}
+        dangerPoints={visibleDangerPoints}
+        selectedDangerPointId={selectedDangerPointId}
         route={route}
         userLocation={userLocation}
         isLiveUserLocation={isLiveUserLocation}
@@ -214,6 +279,7 @@ export default function MapScreen() {
         manualPinMode={manualPinMode}
         onSelectShelter={handleSelectShelter}
         onSelectUserPlace={handleSelectUserPlace}
+        onSelectDangerPoint={handleSelectDangerPoint}
         onCenterChange={handleCenterChange}
         recenterToken={recenterToken}
         fitRouteToken={fitRouteToken}
@@ -258,6 +324,13 @@ export default function MapScreen() {
               {savedPlacesCount} saved place{savedPlacesCount === 1 ? '' : 's'} · offline ready
             </Text>
           </View>
+          {layerVisibility.dangerPoints || layerVisibility.dangerZones ? (
+            <View className="rounded-full bg-orange-500/15 border border-orange-500/40 px-2.5 py-1">
+              <Text className="text-[10.5px] font-semibold text-orange-300">
+                Public-data Danger Zone snapshot · {visibleDangerPoints.length} points
+              </Text>
+            </View>
+          ) : null}
         </View>
       </SafeAreaView>
 
@@ -309,6 +382,15 @@ export default function MapScreen() {
         <View className="px-3 mt-1.5">
           <LayerToggleChips layers={layerVisibility} onToggle={toggleLayer} />
         </View>
+
+        {layerVisibility.dangerPoints || layerVisibility.dangerZones ? (
+          <View className="mt-1.5">
+            <DangerLayerFilterChips
+              value={dangerLayerFilter}
+              onChange={setDangerLayerFilter}
+            />
+          </View>
+        ) : null}
       </SafeAreaView>
 
       {/* Persistent disclaimer */}
@@ -341,7 +423,7 @@ export default function MapScreen() {
       />
 
       {/* Saved fallback shortcut pill */}
-      {!selectedShelter && !selectedUserPlace && Object.keys(fallbacks).length > 0 ? (
+      {!selectedShelter && !selectedUserPlace && !selectedDangerPoint && Object.keys(fallbacks).length > 0 ? (
         <View
           pointerEvents="box-none"
           style={{ position: 'absolute', left: 12, top: 178, zIndex: 14 }}
@@ -360,7 +442,7 @@ export default function MapScreen() {
         </View>
       ) : null}
 
-      {!selectedShelter && !selectedUserPlace ? (
+      {!selectedShelter && !selectedUserPlace && !selectedDangerPoint ? (
         <FindNearestFab
           onPress={handleFindNearest}
           loading={routeState === 'loading'}
@@ -375,9 +457,27 @@ export default function MapScreen() {
         routeState={routeState}
         routeError={routeError}
         isSaved={isSelectedSaved}
+        dangerHits={routeDangerHits.map((d) => ({
+          id: d.id,
+          name: d.name,
+          layerName: d.layerName,
+        }))}
         onClose={handleCloseSheet}
         onNavigate={handleNavigate}
         onSaveFallback={handleSaveFallback}
+      />
+
+      <DangerPointSheet
+        point={selectedDangerPoint}
+        route={showRoute ? route : null}
+        routeShown={showRoute}
+        routeState={routeState}
+        routeError={routeError}
+        isSaved={isSelectedDangerPointSaved}
+        onClose={handleCloseDangerPoint}
+        onNavigate={handleNavigateDangerPoint}
+        onSaveFallback={handleSaveFallbackDangerPoint}
+        onCopyCoords={handleCopyCoords}
       />
 
       <SavedPlaceBottomSheet

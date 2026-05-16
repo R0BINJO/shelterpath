@@ -6,11 +6,13 @@
  *   - dark   style: https://tiles.openfreemap.org/styles/dark
  *
  * Map layers:
- *   - saferoute-danger     (HARDCODED DEMO DANGER ZONE)
- *   - saferoute-route      (active route polyline)
- *   - saferoute-user       (user location dot + halo)
- *   - saferoute-shelters   (official Päästeamet snapshot, green SA3)
- *   - saferoute-userplaces (USER SAVED PLACES — local-only, type-coloured)
+ *   - saferoute-danger        (HARDCODED DEMO DANGER ZONE - visual only)
+ *   - saferoute-dangerzones   (GENERATED PUBLIC-DATA PROXIMITY DANGER ZONES)
+ *   - saferoute-dangerpoints  (Maa- ja Ruumiamet X-GIS Huvipunktid / Riigihaldus)
+ *   - saferoute-route         (active route polyline)
+ *   - saferoute-user          (user location dot + halo)
+ *   - saferoute-shelters      (official Päästeamet snapshot, green SA3)
+ *   - saferoute-userplaces    (USER SAVED PLACES — local-only, type-coloured)
  *
  * PRODUCTION OFFLINE MAP TODO: replace the online style with a local PMTiles file.
  */
@@ -26,6 +28,10 @@ import { View } from 'react-native';
 
 import { SHELTER_COLORS } from '@/lib/constants';
 import { DEMO_DANGER_ZONE, type Shelter } from '@/lib/shelters';
+import {
+  buildDangerZonePolygon,
+  type DangerPoint,
+} from '@/src/data/dangerPoints';
 import { USER_PLACE_TYPE_META, type UserPlace } from '@/src/types/userPlaces';
 
 import type {
@@ -102,6 +108,42 @@ function userPlacesToGeoJson(
   };
 }
 
+function dangerPointsToGeoJson(
+  points: readonly DangerPoint[],
+): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  return {
+    type: 'FeatureCollection',
+    features: points.map((p) => ({
+      type: 'Feature',
+      properties: {
+        id: p.id,
+        name: p.name,
+        layerId: p.layerId,
+        layerName: p.layerName,
+      },
+      geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+    })),
+  };
+}
+
+function dangerZonesToGeoJson(
+  points: readonly DangerPoint[],
+): GeoJSON.FeatureCollection<GeoJSON.Polygon> {
+  return {
+    type: 'FeatureCollection',
+    features: points.map((p) => ({
+      type: 'Feature',
+      properties: { id: `zone:${p.id}`, dangerPointId: p.id },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [
+          buildDangerZonePolygon(p.lat, p.lng, p.dangerZoneRadiusMeters),
+        ],
+      },
+    })),
+  };
+}
+
 function routeFeature(coords: [number, number][]): GeoJSON.Feature<GeoJSON.LineString> {
   return {
     type: 'Feature',
@@ -120,6 +162,8 @@ export default function SafeRouteMap({
   selectedShelterId,
   userPlaces,
   selectedUserPlaceId,
+  dangerPoints,
+  selectedDangerPointId,
   route,
   userLocation,
   isLiveUserLocation,
@@ -129,6 +173,7 @@ export default function SafeRouteMap({
   manualPinMode,
   onSelectShelter,
   onSelectUserPlace,
+  onSelectDangerPoint,
   recenterToken,
   fitRouteToken,
   flyToToken,
@@ -142,6 +187,8 @@ export default function SafeRouteMap({
   onSelectShelterRef.current = onSelectShelter;
   const onSelectUserPlaceRef = useRef(onSelectUserPlace);
   onSelectUserPlaceRef.current = onSelectUserPlace;
+  const onSelectDangerPointRef = useRef(onSelectDangerPoint);
+  onSelectDangerPointRef.current = onSelectDangerPoint;
   const sheltersRef = useRef(shelters);
   sheltersRef.current = shelters;
   const selectedRef = useRef(selectedShelterId);
@@ -150,6 +197,10 @@ export default function SafeRouteMap({
   userPlacesRef.current = userPlaces;
   const selectedUserPlaceRef = useRef(selectedUserPlaceId);
   selectedUserPlaceRef.current = selectedUserPlaceId;
+  const dangerPointsRef = useRef(dangerPoints);
+  dangerPointsRef.current = dangerPoints;
+  const selectedDangerPointRef = useRef(selectedDangerPointId);
+  selectedDangerPointRef.current = selectedDangerPointId;
   const routeRef = useRef(route);
   routeRef.current = route;
   const userLocationRef = useRef(userLocation);
@@ -228,6 +279,8 @@ export default function SafeRouteMap({
       selectedShelterId,
       userPlaces,
       selectedUserPlaceId,
+      dangerPoints,
+      selectedDangerPointId,
       routeCoords: route?.coordinates ?? null,
       userLocation,
       layerVisibility,
@@ -237,6 +290,8 @@ export default function SafeRouteMap({
     selectedShelterId,
     userPlaces,
     selectedUserPlaceId,
+    dangerPoints,
+    selectedDangerPointId,
     route,
     userLocation,
     layerVisibility,
@@ -278,6 +333,8 @@ export default function SafeRouteMap({
     const currentSelected = selectedRef.current;
     const currentUserPlaces = userPlacesRef.current;
     const currentSelectedUserPlace = selectedUserPlaceRef.current;
+    const currentDangerPoints = dangerPointsRef.current;
+    const currentSelectedDangerPoint = selectedDangerPointRef.current;
     const currentRoute = routeRef.current;
     const currentUser = userLocationRef.current;
 
@@ -521,11 +578,107 @@ export default function SafeRouteMap({
       });
     }
 
+    // PUBLIC-DATA DANGER ZONES — translucent orange/red proximity caution
+    // polygons around each Riigihaldus POI Danger Point. They MUST sit below
+    // the shelter and saved-place markers so they never hide them.
+    if (!map.getSource('saferoute-dangerzones')) {
+      map.addSource('saferoute-dangerzones', {
+        type: 'geojson',
+        data: dangerZonesToGeoJson(currentDangerPoints),
+      });
+      // Insert BELOW the shelter halo so green shelter dots stay legible.
+      const beforeId = map.getLayer('saferoute-shelters-halo')
+        ? 'saferoute-shelters-halo'
+        : undefined;
+      map.addLayer(
+        {
+          id: 'saferoute-dangerzones-fill',
+          type: 'fill',
+          source: 'saferoute-dangerzones',
+          paint: {
+            'fill-color': '#ef4444',
+            'fill-opacity': 0.12,
+          },
+        },
+        beforeId,
+      );
+      map.addLayer(
+        {
+          id: 'saferoute-dangerzones-line',
+          type: 'line',
+          source: 'saferoute-dangerzones',
+          paint: {
+            'line-color': '#f97316',
+            'line-width': 1.5,
+            'line-opacity': 0.7,
+            'line-dasharray': [3, 2],
+          },
+        },
+        beforeId,
+      );
+    }
+
+    // PUBLIC-DATA DANGER POINTS — orange warning markers (visually distinct
+    // from green shelter dots and from coloured saved-place squares).
+    if (!map.getSource('saferoute-dangerpoints')) {
+      map.addSource('saferoute-dangerpoints', {
+        type: 'geojson',
+        data: dangerPointsToGeoJson(currentDangerPoints),
+      });
+      map.addLayer({
+        id: 'saferoute-dangerpoints-halo',
+        type: 'circle',
+        source: 'saferoute-dangerpoints',
+        paint: {
+          'circle-radius': [
+            'case',
+            ['==', ['get', 'id'], currentSelectedDangerPoint ?? ''],
+            22,
+            0,
+          ],
+          'circle-color': '#f97316',
+          'circle-opacity': 0.3,
+        },
+      });
+      map.addLayer({
+        id: 'saferoute-dangerpoints-circle',
+        type: 'circle',
+        source: 'saferoute-dangerpoints',
+        paint: {
+          'circle-radius': [
+            'case',
+            ['==', ['get', 'id'], currentSelectedDangerPoint ?? ''],
+            13,
+            9,
+          ],
+          'circle-color': '#f97316',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2.5,
+        },
+      });
+
+      map.on('click', 'saferoute-dangerpoints-circle', (e) => {
+        const f = e.features?.[0];
+        if (!f) return;
+        const id = String(f.properties?.id ?? '');
+        const found = dangerPointsRef.current.find((p) => p.id === id);
+        if (found) onSelectDangerPointRef.current(found);
+      });
+      map.on('mouseenter', 'saferoute-dangerpoints-circle', () => {
+        map.getCanvas().style.cursor = 'pointer';
+      });
+      map.on('mouseleave', 'saferoute-dangerpoints-circle', () => {
+        map.getCanvas().style.cursor = '';
+      });
+    }
+
     updateData(map, {
       shelters: currentShelters,
       selectedShelterId: currentSelected,
       userPlaces: currentUserPlaces,
       selectedUserPlaceId: currentSelectedUserPlace,
+      dangerPoints: currentDangerPoints,
+      selectedDangerPointId: currentSelectedDangerPoint,
       routeCoords: currentRoute?.coordinates ?? null,
       userLocation: currentUser,
       layerVisibility: layerVisibilityRef.current,
@@ -543,6 +696,8 @@ export default function SafeRouteMap({
       selectedShelterId: string | null;
       userPlaces: readonly UserPlace[];
       selectedUserPlaceId: string | null;
+      dangerPoints: readonly DangerPoint[];
+      selectedDangerPointId: string | null;
       routeCoords: [number, number][] | null;
       userLocation: { lat: number; lng: number };
       layerVisibility: SafeRouteLayerVisibility;
@@ -582,6 +737,25 @@ export default function SafeRouteMap({
       ]);
     }
 
+    const dangerPointsSrc = getGeoJsonSource(map, 'saferoute-dangerpoints');
+    dangerPointsSrc?.setData(dangerPointsToGeoJson(args.dangerPoints));
+    const dangerZonesSrc = getGeoJsonSource(map, 'saferoute-dangerzones');
+    dangerZonesSrc?.setData(dangerZonesToGeoJson(args.dangerPoints));
+    if (map.getLayer('saferoute-dangerpoints-halo')) {
+      map.setPaintProperty('saferoute-dangerpoints-halo', 'circle-radius', [
+        'case',
+        ['==', ['get', 'id'], args.selectedDangerPointId ?? ''],
+        22,
+        0,
+      ]);
+      map.setPaintProperty('saferoute-dangerpoints-circle', 'circle-radius', [
+        'case',
+        ['==', ['get', 'id'], args.selectedDangerPointId ?? ''],
+        13,
+        9,
+      ]);
+    }
+
     const routeSrc = getGeoJsonSource(map, 'saferoute-route');
     if (routeSrc) {
       const data: GeoJSON.FeatureCollection<GeoJSON.LineString> = args.routeCoords
@@ -607,6 +781,10 @@ export default function SafeRouteMap({
     setLayerVisible(map, 'saferoute-userplaces-square', v.savedPlaces);
     setLayerVisible(map, 'saferoute-danger-fill', v.danger);
     setLayerVisible(map, 'saferoute-danger-line', v.danger);
+    setLayerVisible(map, 'saferoute-dangerzones-fill', v.dangerZones);
+    setLayerVisible(map, 'saferoute-dangerzones-line', v.dangerZones);
+    setLayerVisible(map, 'saferoute-dangerpoints-halo', v.dangerPoints);
+    setLayerVisible(map, 'saferoute-dangerpoints-circle', v.dangerPoints);
   }
 
   void isLiveUserLocation;

@@ -1,7 +1,7 @@
 /*
  * SafeRoute Varjumine — layer/filter chip row.
- * Lets the user toggle visibility of the official shelters, saved places, and
- * the demo danger zone.
+ * Lets the user toggle visibility of the official shelters, saved places, the
+ * demo danger zone, and the public-data Danger Points / Danger Zones.
  */
 
 import {
@@ -9,6 +9,8 @@ import {
   CircleAlert,
   Eye,
   EyeOff,
+  Landmark,
+  ShieldAlert,
   ShieldCheck,
 } from 'lucide-react-native';
 import { Pressable, View } from 'react-native';
@@ -48,9 +50,31 @@ export function LayerToggleChips({ layers, onToggle }: Props) {
         }
       />
       <Chip
+        active={layers.dangerPoints}
+        onPress={() => onToggle('dangerPoints')}
+        label="Danger Points"
+        icon={
+          <Landmark
+            color={layers.dangerPoints ? '#f97316' : '#9ca3af'}
+            size={12}
+          />
+        }
+      />
+      <Chip
+        active={layers.dangerZones}
+        onPress={() => onToggle('dangerZones')}
+        label="Danger Zones"
+        icon={
+          <ShieldAlert
+            color={layers.dangerZones ? '#ef4444' : '#9ca3af'}
+            size={12}
+          />
+        }
+      />
+      <Chip
         active={layers.danger}
         onPress={() => onToggle('danger')}
-        label="Danger area"
+        label="Demo danger area"
         icon={
           <CircleAlert
             color={layers.danger ? '#ef4444' : '#9ca3af'}

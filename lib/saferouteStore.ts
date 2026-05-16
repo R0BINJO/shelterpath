@@ -34,6 +34,11 @@ import {
   saveUserPlace as saveUserPlaceToStorage,
   updateUserPlace as updateUserPlaceInStorage,
 } from './userPlacesStorage';
+import {
+  findDangerZonesAlongRoute,
+  type DangerPoint,
+  type DangerPointLayerId,
+} from '@/src/data/dangerPoints';
 import type { ShelterRegion } from '@/src/data/officialShelters';
 import type { UserPlace, UserPlaceType } from '@/src/types/userPlaces';
 
@@ -56,6 +61,23 @@ export type LayerVisibility = {
   shelters: boolean;
   savedPlaces: boolean;
   danger: boolean;
+  dangerPoints: boolean;
+  dangerZones: boolean;
+};
+
+export type DangerLayerFilter = 'all' | DangerPointLayerId;
+
+export type FallbackDangerPoint = {
+  fallbackDangerPointId: string;
+  fallbackDangerPointName: string;
+  fallbackDangerPointAddress: string;
+  fallbackDangerPointLat: number;
+  fallbackDangerPointLng: number;
+  fallbackDangerPointLayerId: DangerPointLayerId;
+  fallbackDangerPointLayerName: string;
+  fallbackDangerZoneRadiusMeters: number;
+  savedAt: string;
+  dataSnapshotDate: string;
 };
 
 export type AddPlaceSheetState =
@@ -66,6 +88,7 @@ type SafeRouteState = {
   // UI state (not persisted)
   selectedShelterId: string | null;
   selectedUserPlaceId: string | null;
+  selectedDangerPointId: string | null;
   showRoute: boolean;
   crisisMode: boolean;
   offlineMode: boolean;
@@ -75,6 +98,7 @@ type SafeRouteState = {
   addPlaceSheet: AddPlaceSheetState;
   savedPlacesPanelOpen: boolean;
   layerVisibility: LayerVisibility;
+  dangerLayerFilter: DangerLayerFilter;
 
   // Real interactive map state (not persisted)
   userLocation: LatLng;
@@ -89,6 +113,8 @@ type SafeRouteState = {
   routeStartLabel: string | null;
   recenterToken: number;
   fitRouteToken: number;
+  /** Danger Points whose proximity zone the current route intersects. */
+  routeDangerHits: DangerPoint[];
 
   // User saved places (loaded once on mount, persisted under userPlaces.v1)
   userPlaces: UserPlace[];
@@ -96,13 +122,16 @@ type SafeRouteState = {
 
   // Persisted offline plan
   fallbacks: Partial<Record<FallbackSlot, SavedFallback>>;
+  fallbackDangerPoint: FallbackDangerPoint | null;
   familyMeetingPoint: string;
   emergencyNotes: string;
 
   // Actions
   selectShelter: (id: string | null) => void;
   selectUserPlace: (id: string | null) => void;
+  selectDangerPoint: (id: string | null) => void;
   navigateToShelter: (shelter: Shelter) => Promise<void>;
+  navigateToDangerPoint: (point: DangerPoint) => Promise<void>;
   findNearest: () => Promise<void>;
   routeFromSavedPlaceToNearestShelter: (place: UserPlace) => Promise<void>;
   routeFromCurrentLocationToSavedPlace: (place: UserPlace) => Promise<void>;
@@ -117,9 +146,12 @@ type SafeRouteState = {
   bumpFitRoute: () => void;
   saveFallback: (slot: FallbackSlot, shelter: Shelter) => void;
   clearFallback: (slot: FallbackSlot) => void;
+  saveFallbackDangerPoint: (point: DangerPoint) => void;
+  clearFallbackDangerPoint: () => void;
   setFamilyMeetingPoint: (v: string) => void;
   setEmergencyNotes: (v: string) => void;
   clearRoute: () => void;
+  setDangerLayerFilter: (f: DangerLayerFilter) => void;
 
   // Saved-place actions
   loadUserPlaces: () => Promise<void>;
@@ -139,6 +171,7 @@ export const useSafeRouteStore = create<SafeRouteState>()(
     (set, get) => ({
       selectedShelterId: null,
       selectedUserPlaceId: null,
+      selectedDangerPointId: null,
       showRoute: false,
       crisisMode: true,
       offlineMode: false,
@@ -147,7 +180,14 @@ export const useSafeRouteStore = create<SafeRouteState>()(
       region: 'tallinn',
       addPlaceSheet: { open: false },
       savedPlacesPanelOpen: false,
-      layerVisibility: { shelters: true, savedPlaces: true, danger: true },
+      layerVisibility: {
+        shelters: true,
+        savedPlaces: true,
+        danger: true,
+        dangerPoints: true,
+        dangerZones: true,
+      },
+      dangerLayerFilter: 'all',
 
       userLocation: getDemoStart(),
       isLiveUserLocation: false,
@@ -160,11 +200,13 @@ export const useSafeRouteStore = create<SafeRouteState>()(
       routeStartLabel: null,
       recenterToken: 0,
       fitRouteToken: 0,
+      routeDangerHits: [],
 
       userPlaces: [],
       userPlacesLoaded: false,
 
       fallbacks: {},
+      fallbackDangerPoint: null,
       familyMeetingPoint: '',
       emergencyNotes: '',
 
@@ -174,12 +216,14 @@ export const useSafeRouteStore = create<SafeRouteState>()(
           return {
             selectedShelterId: id,
             selectedUserPlaceId: id ? null : s.selectedUserPlaceId,
+            selectedDangerPointId: id ? null : s.selectedDangerPointId,
             showRoute: false,
             route: null,
             routeState: 'idle',
             routeError: null,
             routeStart: null,
             routeStartLabel: null,
+            routeDangerHits: [],
           };
         }),
 
@@ -187,12 +231,28 @@ export const useSafeRouteStore = create<SafeRouteState>()(
         set((s) => ({
           selectedUserPlaceId: id,
           selectedShelterId: id ? null : s.selectedShelterId,
+          selectedDangerPointId: id ? null : s.selectedDangerPointId,
           showRoute: false,
           route: null,
           routeState: 'idle',
           routeError: null,
           routeStart: null,
           routeStartLabel: null,
+          routeDangerHits: [],
+        })),
+
+      selectDangerPoint: (id) =>
+        set((s) => ({
+          selectedDangerPointId: id,
+          selectedShelterId: id ? null : s.selectedShelterId,
+          selectedUserPlaceId: id ? null : s.selectedUserPlaceId,
+          showRoute: false,
+          route: null,
+          routeState: 'idle',
+          routeError: null,
+          routeStart: null,
+          routeStartLabel: null,
+          routeDangerHits: [],
         })),
 
       navigateToShelter: async (shelter) => {
@@ -200,11 +260,13 @@ export const useSafeRouteStore = create<SafeRouteState>()(
         set({
           selectedShelterId: shelter.id,
           selectedUserPlaceId: null,
+          selectedDangerPointId: null,
           showRoute: true,
           routeState: 'loading',
           routeError: null,
           routeStart: userLocation,
           routeStartLabel: 'Current location',
+          routeDangerHits: [],
         });
         try {
           const result = await getRouteToShelter(userLocation, shelter, {
@@ -214,6 +276,55 @@ export const useSafeRouteStore = create<SafeRouteState>()(
             route: result,
             routeState: 'ready',
             fitRouteToken: s.fitRouteToken + 1,
+            routeDangerHits: findDangerZonesAlongRoute(result.coordinates),
+          }));
+        } catch (e) {
+          set({
+            routeState: 'error',
+            routeError: e instanceof Error ? e.message : 'Routing failed',
+          });
+        }
+      },
+
+      navigateToDangerPoint: async (point) => {
+        const { userLocation, offlineMode } = get();
+        // Synthesise a shelter-shaped destination so we can reuse the routing
+        // primitive. We do NOT classify the Danger Point as a shelter.
+        const syntheticDest = {
+          id: `dangerpoint:${point.id}`,
+          name: point.name,
+          address: point.address,
+          municipality: point.municipality,
+          county: point.county,
+          lat: point.lat,
+          lng: point.lng,
+          type: 'SA3',
+          source: 'danger-point',
+          official: false,
+          verified: false,
+          dataSnapshotDate: point.dataSnapshotDate,
+          originalProperties: {},
+        } as unknown as Shelter;
+        set({
+          selectedDangerPointId: point.id,
+          selectedShelterId: null,
+          selectedUserPlaceId: null,
+          showRoute: true,
+          routeState: 'loading',
+          routeError: null,
+          routeStart: userLocation,
+          routeStartLabel: 'Current location',
+          routeDangerHits: [],
+        });
+        try {
+          const result = await getRouteToShelter(userLocation, syntheticDest, {
+            allowLive: !offlineMode,
+          });
+          set((s) => ({
+            route: result,
+            routeState: 'ready',
+            fitRouteToken: s.fitRouteToken + 1,
+            routeDangerHits: findDangerZonesAlongRoute(result.coordinates),
           }));
         } catch (e) {
           set({
@@ -231,6 +342,7 @@ export const useSafeRouteStore = create<SafeRouteState>()(
           showRoute: true,
           routeStart: userLocation,
           routeStartLabel: 'Current location',
+          routeDangerHits: [],
         });
         try {
           const { shelter, route } = await findNearestByRouteDistance(
@@ -241,9 +353,11 @@ export const useSafeRouteStore = create<SafeRouteState>()(
           set((s) => ({
             selectedShelterId: shelter.id,
             selectedUserPlaceId: null,
+            selectedDangerPointId: null,
             route,
             routeState: 'ready',
             fitRouteToken: s.fitRouteToken + 1,
+            routeDangerHits: findDangerZonesAlongRoute(route.coordinates),
           }));
         } catch (e) {
           set({
@@ -263,6 +377,8 @@ export const useSafeRouteStore = create<SafeRouteState>()(
           routeStart: start,
           routeStartLabel: place.label,
           selectedUserPlaceId: place.id,
+          selectedDangerPointId: null,
+          routeDangerHits: [],
         });
         try {
           const { shelter, route } = await findNearestByRouteDistance(
@@ -275,6 +391,7 @@ export const useSafeRouteStore = create<SafeRouteState>()(
             route,
             routeState: 'ready',
             fitRouteToken: s.fitRouteToken + 1,
+            routeDangerHits: findDangerZonesAlongRoute(route.coordinates),
           }));
         } catch (e) {
           set({
@@ -312,6 +429,8 @@ export const useSafeRouteStore = create<SafeRouteState>()(
           routeStartLabel: 'Current location',
           selectedUserPlaceId: place.id,
           selectedShelterId: null,
+          selectedDangerPointId: null,
+          routeDangerHits: [],
         });
         try {
           const result = await getRouteToShelter(userLocation, syntheticDest, {
@@ -321,6 +440,7 @@ export const useSafeRouteStore = create<SafeRouteState>()(
             route: result,
             routeState: 'ready',
             fitRouteToken: s.fitRouteToken + 1,
+            routeDangerHits: findDangerZonesAlongRoute(result.coordinates),
           }));
         } catch (e) {
           set({
@@ -370,6 +490,25 @@ export const useSafeRouteStore = create<SafeRouteState>()(
         }),
       setFamilyMeetingPoint: (v) => set({ familyMeetingPoint: v }),
       setEmergencyNotes: (v) => set({ emergencyNotes: v }),
+
+      saveFallbackDangerPoint: (point) =>
+        set({
+          fallbackDangerPoint: {
+            fallbackDangerPointId: point.id,
+            fallbackDangerPointName: point.name,
+            fallbackDangerPointAddress: point.address,
+            fallbackDangerPointLat: point.lat,
+            fallbackDangerPointLng: point.lng,
+            fallbackDangerPointLayerId: point.layerId,
+            fallbackDangerPointLayerName: point.layerName,
+            fallbackDangerZoneRadiusMeters: point.dangerZoneRadiusMeters,
+            savedAt: new Date().toISOString(),
+            dataSnapshotDate: point.dataSnapshotDate,
+          },
+        }),
+      clearFallbackDangerPoint: () => set({ fallbackDangerPoint: null }),
+
+      setDangerLayerFilter: (f) => set({ dangerLayerFilter: f }),
       clearRoute: () =>
         set({
           route: null,
@@ -378,6 +517,7 @@ export const useSafeRouteStore = create<SafeRouteState>()(
           routeError: null,
           routeStart: null,
           routeStartLabel: null,
+          routeDangerHits: [],
         }),
 
       // USER SAVED PLACES
@@ -433,10 +573,11 @@ export const useSafeRouteStore = create<SafeRouteState>()(
         })),
     }),
     {
-      name: 'saferoute.offline-plan.v3-official',
+      name: 'saferoute.offline-plan.v4-danger',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({
         fallbacks: s.fallbacks,
+        fallbackDangerPoint: s.fallbackDangerPoint,
         familyMeetingPoint: s.familyMeetingPoint,
         emergencyNotes: s.emergencyNotes,
       }),

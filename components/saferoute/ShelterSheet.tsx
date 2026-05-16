@@ -17,6 +17,7 @@
 import { useEffect } from 'react';
 import {
   ActivityIcon,
+  AlertTriangle,
   BadgeCheck,
   BookmarkPlus,
   Footprints,
@@ -53,6 +54,8 @@ type Props = {
   routeState: RouteUiState;
   routeError: string | null;
   isSaved: boolean;
+  /** Danger Points the current route passes inside the proximity zone of. */
+  dangerHits: { id: string; name: string; layerName: string }[];
   onClose: () => void;
   onNavigate: () => void;
   onSaveFallback: () => void;
@@ -119,6 +122,7 @@ export function ShelterSheet({
   routeState,
   routeError,
   isSaved,
+  dangerHits,
   onClose,
   onNavigate,
   onSaveFallback,
@@ -341,6 +345,29 @@ export function ShelterSheet({
                     <Text className="text-muted-foreground text-[10.5px] italic mb-2">
                       {route.sourceLabel}
                     </Text>
+
+                    {/* Route ↔ public-data Danger Zone caution warning. */}
+                    {dangerHits.length > 0 ? (
+                      <View className="mb-2 rounded-lg border border-orange-500/40 bg-orange-500/10 px-2.5 py-2">
+                        <View className="flex-row items-center gap-1.5 mb-1">
+                          <AlertTriangle color="#fb923c" size={13} />
+                          <Text className="text-orange-300 text-[11.5px] font-semibold flex-1">
+                            Route passes near public-data caution zone
+                          </Text>
+                        </View>
+                        <Text className="text-muted-foreground text-[10.5px] leading-[14px]">
+                          {dangerHits.length === 1
+                            ? `Crosses the proximity zone around ${dangerHits[0].layerName}: ${dangerHits[0].name}.`
+                            : `Crosses the proximity zone around ${dangerHits.length} public-administration POIs.`}
+                          {' '}
+                          This is not a safety claim about the route.
+                        </Text>
+                      </View>
+                    ) : route.coordinates.length >= 2 ? (
+                      <Text className="text-[10.5px] text-muted-foreground italic mb-2">
+                        Route does not pass through currently displayed public-data caution zones.
+                      </Text>
+                    ) : null}
 
                     {route.steps && route.steps.length > 0 ? (
                       <View className="mb-2">

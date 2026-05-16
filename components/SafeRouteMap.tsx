@@ -6,6 +6,8 @@
  *
  * Renders:
  *   - DEMO DANGER ZONE (visual)
+ *   - PUBLIC-DATA DANGER ZONES (X-GIS Huvipunktid / Riigihaldus, translucent)
+ *   - PUBLIC-DATA DANGER POINTS (orange warning markers)
  *   - active route polyline
  *   - user location dot
  *   - official Päästeamet shelters (green SA3 markers)
@@ -25,6 +27,7 @@ import MapView, {
 
 import { SHELTER_COLORS } from '@/lib/constants';
 import { DEMO_DANGER_ZONE, type Shelter } from '@/lib/shelters';
+import type { DangerPoint } from '@/src/data/dangerPoints';
 import { getUserPlaceMeta, type UserPlace } from '@/src/types/userPlaces';
 
 import type { SafeRouteMapProps } from './SafeRouteMap.types';
@@ -45,6 +48,8 @@ export default function SafeRouteMap({
   selectedShelterId,
   userPlaces,
   selectedUserPlaceId,
+  dangerPoints,
+  selectedDangerPointId,
   route,
   userLocation,
   crisisMode,
@@ -52,6 +57,7 @@ export default function SafeRouteMap({
   manualPinMode,
   onSelectShelter,
   onSelectUserPlace,
+  onSelectDangerPoint,
   recenterToken,
   fitRouteToken,
   flyToToken,
@@ -138,6 +144,26 @@ export default function SafeRouteMap({
             strokeWidth={2}
           />
         ) : null}
+
+        {/* PUBLIC-DATA DANGER ZONES — translucent orange/red caution circles
+            around each Riigihaldus POI. Not real-time threat areas. */}
+        {layerVisibility.dangerZones
+          ? dangerPoints
+              .filter(
+                (p): p is DangerPoint =>
+                  Number.isFinite(p.lat) && Number.isFinite(p.lng),
+              )
+              .map((p) => (
+                <Circle
+                  key={`dz:${p.id}`}
+                  center={{ latitude: p.lat, longitude: p.lng }}
+                  radius={p.dangerZoneRadiusMeters}
+                  fillColor="rgba(239, 68, 68, 0.12)"
+                  strokeColor="rgba(249, 115, 22, 0.7)"
+                  strokeWidth={1.5}
+                />
+              ))
+          : null}
 
         {routeCoords.length >= 2 ? (
           <>
@@ -238,6 +264,38 @@ export default function SafeRouteMap({
                 </Marker>
               );
             })
+          : null}
+
+        {/* PUBLIC-DATA DANGER POINTS — orange warning markers. */}
+        {layerVisibility.dangerPoints
+          ? dangerPoints
+              .filter(
+                (p): p is DangerPoint =>
+                  Number.isFinite(p.lat) && Number.isFinite(p.lng),
+              )
+              .map((p) => {
+                const selected = p.id === selectedDangerPointId;
+                return (
+                  <Marker
+                    key={`dp:${p.id}`}
+                    coordinate={{ latitude: p.lat, longitude: p.lng }}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                    onPress={() => onSelectDangerPoint(p)}
+                    tracksViewChanges={selected}
+                  >
+                    <View
+                      style={{
+                        width: selected ? 30 : 22,
+                        height: selected ? 30 : 22,
+                        borderRadius: selected ? 15 : 11,
+                        backgroundColor: '#f97316',
+                        borderColor: '#ffffff',
+                        borderWidth: 2.5,
+                      }}
+                    />
+                  </Marker>
+                );
+              })
           : null}
       </MapView>
 

@@ -124,6 +124,26 @@ export function InfoModal({
                 </Text>
               </View>
 
+              <View className="mt-3 rounded-xl bg-orange-500/15 border border-orange-500/40 px-3 py-2.5">
+                <Text className="text-orange-300 text-[12px] font-semibold">
+                  Danger Points & Danger Zones (public-data snapshot)
+                </Text>
+                <Text className="text-orange-200/90 text-[11.5px] mt-1 leading-[16px]">
+                  Danger Points and Danger Zones are generated from a Maa- ja
+                  Ruumiamet / X-GIS Huvipunktid public-data snapshot
+                  (Riigihaldus category: administrative centres, police, border
+                  guard, rescue stations, state agencies, foreign missions) for
+                  civilian route awareness. They are NOT official emergency
+                  alerts, NOT confirmed threat areas, and NOT vulnerability
+                  assessments. SafeRoute is not an official emergency system.
+                  Always follow official instructions.
+                </Text>
+                <Text className="text-orange-200/80 text-[10.5px] mt-1.5 leading-[14px]">
+                  Source · Maa- ja Ruumiamet X-GIS Huvipunktid{'\n'}
+                  https://xgis.maaamet.ee/xgis2/page/app/hp
+                </Text>
+              </View>
+
               <Text className="text-[11px] text-muted-foreground mt-3 italic">
                 No login, no backend. Shelter data, the danger zone, and the
                 offline fallback graph are bundled with the app and remain on

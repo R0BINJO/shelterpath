@@ -7,6 +7,7 @@
 
 import type { RouteResult } from '@/lib/routing';
 import type { Shelter } from '@/lib/shelters';
+import type { DangerPoint } from '@/src/data/dangerPoints';
 import type { UserPlace } from '@/src/types/userPlaces';
 
 export type SafeRouteMapStyle = 'bright' | 'dark';
@@ -15,6 +16,8 @@ export type SafeRouteLayerVisibility = {
   shelters: boolean;
   savedPlaces: boolean;
   danger: boolean;
+  dangerPoints: boolean;
+  dangerZones: boolean;
 };
 
 export type SafeRouteMapProps = {
@@ -22,6 +25,8 @@ export type SafeRouteMapProps = {
   selectedShelterId: string | null;
   userPlaces: readonly UserPlace[];
   selectedUserPlaceId: string | null;
+  dangerPoints: readonly DangerPoint[];
+  selectedDangerPointId: string | null;
   route: RouteResult | null;
   userLocation: { lat: number; lng: number };
   isLiveUserLocation: boolean;
@@ -30,6 +35,7 @@ export type SafeRouteMapProps = {
   layerVisibility: SafeRouteLayerVisibility;
   onSelectShelter: (s: Shelter) => void;
   onSelectUserPlace: (p: UserPlace) => void;
+  onSelectDangerPoint: (p: DangerPoint) => void;
   /** Manual-pin mode: when true, the map shows a centred crosshair the user pans. */
   manualPinMode?: boolean;
   /** Imperative recenter to user (called when "Locate" tapped). */
