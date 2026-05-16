@@ -32,6 +32,10 @@ import {
   buildDangerZonePolygon,
   type DangerPoint,
 } from '@/src/data/dangerPoints';
+import {
+  COMMUNITY_SHELTER_TYPE_META,
+  type CommunityShelter,
+} from '@/src/types/communityShelters';
 import { USER_PLACE_TYPE_META, type UserPlace } from '@/src/types/userPlaces';
 
 import type {
@@ -126,6 +130,26 @@ function dangerPointsToGeoJson(
   };
 }
 
+function communitySheltersToGeoJson(
+  shelters: readonly CommunityShelter[],
+): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  return {
+    type: 'FeatureCollection',
+    features: shelters.map((s) => ({
+      type: 'Feature',
+      properties: {
+        id: s.id,
+        name: s.name,
+        type: s.shelterType,
+        color:
+          COMMUNITY_SHELTER_TYPE_META[s.shelterType]?.color ??
+          COMMUNITY_SHELTER_TYPE_META.other.color,
+      },
+      geometry: { type: 'Point', coordinates: [s.lng, s.lat] },
+    })),
+  };
+}
+
 function dangerZonesToGeoJson(
   points: readonly DangerPoint[],
 ): GeoJSON.FeatureCollection<GeoJSON.Polygon> {
@@ -164,6 +188,8 @@ export default function SafeRouteMap({
   selectedUserPlaceId,
   dangerPoints,
   selectedDangerPointId,
+  communityShelters,
+  selectedCommunityShelterId,
   route,
   userLocation,
   isLiveUserLocation,
@@ -174,6 +200,7 @@ export default function SafeRouteMap({
   onSelectShelter,
   onSelectUserPlace,
   onSelectDangerPoint,
+  onSelectCommunityShelter,
   recenterToken,
   fitRouteToken,
   flyToToken,
@@ -189,6 +216,8 @@ export default function SafeRouteMap({
   onSelectUserPlaceRef.current = onSelectUserPlace;
   const onSelectDangerPointRef = useRef(onSelectDangerPoint);
   onSelectDangerPointRef.current = onSelectDangerPoint;
+  const onSelectCommunityShelterRef = useRef(onSelectCommunityShelter);
+  onSelectCommunityShelterRef.current = onSelectCommunityShelter;
   const sheltersRef = useRef(shelters);
   sheltersRef.current = shelters;
   const selectedRef = useRef(selectedShelterId);
@@ -201,6 +230,10 @@ export default function SafeRouteMap({
   dangerPointsRef.current = dangerPoints;
   const selectedDangerPointRef = useRef(selectedDangerPointId);
   selectedDangerPointRef.current = selectedDangerPointId;
+  const communitySheltersRef = useRef(communityShelters);
+  communitySheltersRef.current = communityShelters;
+  const selectedCommunityShelterRef = useRef(selectedCommunityShelterId);
+  selectedCommunityShelterRef.current = selectedCommunityShelterId;
   const routeRef = useRef(route);
   routeRef.current = route;
   const userLocationRef = useRef(userLocation);
@@ -281,6 +314,8 @@ export default function SafeRouteMap({
       selectedUserPlaceId,
       dangerPoints,
       selectedDangerPointId,
+      communityShelters,
+      selectedCommunityShelterId,
       routeCoords: route?.coordinates ?? null,
       userLocation,
       layerVisibility,
@@ -292,6 +327,8 @@ export default function SafeRouteMap({
     selectedUserPlaceId,
     dangerPoints,
     selectedDangerPointId,
+    communityShelters,
+    selectedCommunityShelterId,
     route,
     userLocation,
     layerVisibility,
@@ -335,6 +372,8 @@ export default function SafeRouteMap({
     const currentSelectedUserPlace = selectedUserPlaceRef.current;
     const currentDangerPoints = dangerPointsRef.current;
     const currentSelectedDangerPoint = selectedDangerPointRef.current;
+    const currentCommunity = communitySheltersRef.current;
+    const currentSelectedCommunity = selectedCommunityShelterRef.current;
     const currentRoute = routeRef.current;
     const currentUser = userLocationRef.current;
 
@@ -672,6 +711,62 @@ export default function SafeRouteMap({
       });
     }
 
+    // COMMUNITY SHELTERS — unverified user submissions. Amber square markers
+    // so they read as visually distinct from green official shelter dots and
+    // from coloured saved-place squares. Rendered ABOVE shelters/saved places
+    // so they are always tappable, but never participate in routing.
+    if (!map.getSource('saferoute-communityshelters')) {
+      map.addSource('saferoute-communityshelters', {
+        type: 'geojson',
+        data: communitySheltersToGeoJson(currentCommunity),
+      });
+      map.addLayer({
+        id: 'saferoute-communityshelters-halo',
+        type: 'circle',
+        source: 'saferoute-communityshelters',
+        paint: {
+          'circle-radius': [
+            'case',
+            ['==', ['get', 'id'], currentSelectedCommunity ?? ''],
+            22,
+            0,
+          ],
+          'circle-color': ['get', 'color'],
+          'circle-opacity': 0.3,
+        },
+      });
+      map.addLayer({
+        id: 'saferoute-communityshelters-square',
+        type: 'circle',
+        source: 'saferoute-communityshelters',
+        paint: {
+          'circle-radius': [
+            'case',
+            ['==', ['get', 'id'], currentSelectedCommunity ?? ''],
+            13,
+            10,
+          ],
+          'circle-color': ['get', 'color'],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 3,
+        },
+      });
+
+      map.on('click', 'saferoute-communityshelters-square', (e) => {
+        const f = e.features?.[0];
+        if (!f) return;
+        const id = String(f.properties?.id ?? '');
+        const found = communitySheltersRef.current.find((s) => s.id === id);
+        if (found) onSelectCommunityShelterRef.current(found);
+      });
+      map.on('mouseenter', 'saferoute-communityshelters-square', () => {
+        map.getCanvas().style.cursor = 'pointer';
+      });
+      map.on('mouseleave', 'saferoute-communityshelters-square', () => {
+        map.getCanvas().style.cursor = '';
+      });
+    }
+
     updateData(map, {
       shelters: currentShelters,
       selectedShelterId: currentSelected,
@@ -679,6 +774,8 @@ export default function SafeRouteMap({
       selectedUserPlaceId: currentSelectedUserPlace,
       dangerPoints: currentDangerPoints,
       selectedDangerPointId: currentSelectedDangerPoint,
+      communityShelters: currentCommunity,
+      selectedCommunityShelterId: currentSelectedCommunity,
       routeCoords: currentRoute?.coordinates ?? null,
       userLocation: currentUser,
       layerVisibility: layerVisibilityRef.current,
@@ -698,6 +795,8 @@ export default function SafeRouteMap({
       selectedUserPlaceId: string | null;
       dangerPoints: readonly DangerPoint[];
       selectedDangerPointId: string | null;
+      communityShelters: readonly CommunityShelter[];
+      selectedCommunityShelterId: string | null;
       routeCoords: [number, number][] | null;
       userLocation: { lat: number; lng: number };
       layerVisibility: SafeRouteLayerVisibility;
@@ -756,6 +855,23 @@ export default function SafeRouteMap({
       ]);
     }
 
+    const communitySrc = getGeoJsonSource(map, 'saferoute-communityshelters');
+    communitySrc?.setData(communitySheltersToGeoJson(args.communityShelters));
+    if (map.getLayer('saferoute-communityshelters-halo')) {
+      map.setPaintProperty('saferoute-communityshelters-halo', 'circle-radius', [
+        'case',
+        ['==', ['get', 'id'], args.selectedCommunityShelterId ?? ''],
+        22,
+        0,
+      ]);
+      map.setPaintProperty('saferoute-communityshelters-square', 'circle-radius', [
+        'case',
+        ['==', ['get', 'id'], args.selectedCommunityShelterId ?? ''],
+        13,
+        10,
+      ]);
+    }
+
     const routeSrc = getGeoJsonSource(map, 'saferoute-route');
     if (routeSrc) {
       const data: GeoJSON.FeatureCollection<GeoJSON.LineString> = args.routeCoords
@@ -785,6 +901,8 @@ export default function SafeRouteMap({
     setLayerVisible(map, 'saferoute-dangerzones-line', v.dangerZones);
     setLayerVisible(map, 'saferoute-dangerpoints-halo', v.dangerPoints);
     setLayerVisible(map, 'saferoute-dangerpoints-circle', v.dangerPoints);
+    setLayerVisible(map, 'saferoute-communityshelters-halo', v.communityShelters);
+    setLayerVisible(map, 'saferoute-communityshelters-square', v.communityShelters);
   }
 
   void isLiveUserLocation;

@@ -21,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DARK_THEME, LIGHT_THEME } from '@/lib/constants';
 import { initPostHog } from '@/lib/posthog';
 import { reportErrorToParent } from '@/lib/reportPreviewError';
+import { useAuthStore } from '@/lib/authStore';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { ToastProvider } from '@/components/ui/toast';
 
@@ -154,6 +155,11 @@ export default function RootLayout() {
     if (Platform.OS === 'web') {
       initPostHog();
     }
+  }, []);
+
+  // Restore Supabase auth session (community account feature). Runs once.
+  useEffect(() => {
+    void useAuthStore.getState().init();
   }, []);
 
   if (!loaded && !error) {

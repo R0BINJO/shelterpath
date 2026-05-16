@@ -60,6 +60,8 @@ export type RouteState = 'idle' | 'loading' | 'ready' | 'error';
 export type LayerVisibility = {
   shelters: boolean;
   savedPlaces: boolean;
+  /** COMMUNITY SHELTERS — unverified user submissions. Online-cached-offline. */
+  communityShelters: boolean;
   danger: boolean;
   dangerPoints: boolean;
   dangerZones: boolean;
@@ -183,6 +185,7 @@ export const useSafeRouteStore = create<SafeRouteState>()(
       layerVisibility: {
         shelters: true,
         savedPlaces: true,
+        communityShelters: true,
         danger: true,
         dangerPoints: true,
         dangerZones: true,

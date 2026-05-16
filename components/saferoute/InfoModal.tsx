@@ -124,6 +124,22 @@ export function InfoModal({
                 </Text>
               </View>
 
+              <View className="mt-3 rounded-xl bg-amber-500/15 border border-amber-500/40 px-3 py-2.5">
+                <Text className="text-amber-300 text-[12px] font-semibold">
+                  Community shelters (unverified, online)
+                </Text>
+                <Text className="text-amber-200/90 text-[11.5px] mt-1 leading-[16px]">
+                  Community shelters are user-submitted shelter points. Creating
+                  an account, signing in, and posting new shelters require
+                  internet — Supabase Auth handles authentication, and submissions
+                  are stored online so other users can see them. Once fetched,
+                  the markers are cached on your device and remain visible
+                  offline. They are NOT official shelters, are clearly badged
+                  &quot;Unverified&quot;, and are never used by
+                  &quot;Find nearest shelter&quot;.
+                </Text>
+              </View>
+
               <View className="mt-3 rounded-xl bg-orange-500/15 border border-orange-500/40 px-3 py-2.5">
                 <Text className="text-orange-300 text-[12px] font-semibold">
                   Danger Points & Danger Zones (public-data snapshot)

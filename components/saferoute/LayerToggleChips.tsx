@@ -12,6 +12,7 @@ import {
   Landmark,
   ShieldAlert,
   ShieldCheck,
+  Users,
 } from 'lucide-react-native';
 import { Pressable, View } from 'react-native';
 
@@ -45,6 +46,17 @@ export function LayerToggleChips({ layers, onToggle }: Props) {
         icon={
           <Bookmark
             color={layers.savedPlaces ? '#a855f7' : '#9ca3af'}
+            size={12}
+          />
+        }
+      />
+      <Chip
+        active={layers.communityShelters}
+        onPress={() => onToggle('communityShelters')}
+        label="Community shelters"
+        icon={
+          <Users
+            color={layers.communityShelters ? '#f59e0b' : '#9ca3af'}
             size={12}
           />
         }

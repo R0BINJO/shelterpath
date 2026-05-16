@@ -13,6 +13,7 @@ import {
   ListChecks,
   MapPin,
   Plus,
+  Users,
 } from 'lucide-react-native';
 import { Pressable, View } from 'react-native';
 
@@ -24,8 +25,10 @@ type StackProps = {
   onToggleStyle: () => void;
   onOpenSavedPlaces: () => void;
   onAddPlace: () => void;
+  onShareShelter: () => void;
   mapStyleLabel: string;
   savedPlacesCount: number;
+  communityShelterCount: number;
   bottomInset: number;
 };
 
@@ -35,8 +38,10 @@ export function MapFabStack({
   onToggleStyle,
   onOpenSavedPlaces,
   onAddPlace,
+  onShareShelter,
   mapStyleLabel,
   savedPlacesCount,
+  communityShelterCount,
   bottomInset,
 }: StackProps) {
   return (
@@ -50,6 +55,18 @@ export function MapFabStack({
       }}
     >
       <View className="gap-2.5 items-end">
+        <Pressable
+          onPress={onShareShelter}
+          accessibilityRole="button"
+          accessibilityLabel="Share a community shelter"
+          className="h-12 px-3 items-center justify-center rounded-full bg-amber-500 shadow-md flex-row gap-1.5"
+        >
+          <Users color="#ffffff" size={18} />
+          <Text className="text-white text-[12px] font-semibold">
+            Share shelter {communityShelterCount > 0 ? `· ${communityShelterCount}` : ''}
+          </Text>
+        </Pressable>
+
         <Pressable
           onPress={onAddPlace}
           accessibilityRole="button"

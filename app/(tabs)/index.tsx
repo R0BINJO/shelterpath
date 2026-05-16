@@ -19,6 +19,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AccountChip } from '@/components/saferoute/AccountChip';
+import { AddCommunityShelterSheet } from '@/components/saferoute/AddCommunityShelterSheet';
+import { AuthSheet } from '@/components/saferoute/AuthSheet';
+import { CommunityShelterSheet } from '@/components/saferoute/CommunityShelterSheet';
 import { DangerLayerFilterChips } from '@/components/saferoute/DangerLayerFilterChips';
 import { DangerPointSheet } from '@/components/saferoute/DangerPointSheet';
 import { FindNearestFab, MapFabStack } from '@/components/saferoute/FloatingControls';
@@ -34,6 +38,8 @@ import SafeRouteMap from '@/components/SafeRouteMap';
 import { ShelterSheet } from '@/components/saferoute/ShelterSheet';
 import { TopStatusBar } from '@/components/saferoute/TopStatusBar';
 import { Text } from '@/components/ui/text';
+import { useAuthStore } from '@/lib/authStore';
+import { useCommunityShelterStore } from '@/lib/communityShelterStore';
 import { useSafeRouteStore } from '@/lib/saferouteStore';
 import { SHELTERS, type Shelter } from '@/lib/shelters';
 import { cn } from '@/lib/utils';
@@ -42,6 +48,7 @@ import {
   type DangerPoint,
 } from '@/src/data/dangerPoints';
 import { filterShelters, type ShelterRegion } from '@/src/data/officialShelters';
+import type { CommunityShelter } from '@/src/types/communityShelters';
 
 const REGION_OPTIONS: { value: ShelterRegion; label: string }[] = [
   { value: 'near-me', label: 'Near me' },
@@ -100,6 +107,18 @@ export default function MapScreen() {
     toggleLayer,
     setDangerLayerFilter,
   } = useSafeRouteStore();
+
+  // Community shelter store (Supabase-backed, AsyncStorage-cached).
+  const communityShelters = useCommunityShelterStore((s) => s.shelters);
+  const selectedCommunityShelterId = useCommunityShelterStore((s) => s.selectedId);
+  const selectCommunityShelter = useCommunityShelterStore((s) => s.select);
+  const loadCommunityFromCache = useCommunityShelterStore((s) => s.loadFromCache);
+  const refreshCommunityFromServer = useCommunityShelterStore((s) => s.refreshFromServer);
+  const setCommunityAddSheetOpen = useCommunityShelterStore((s) => s.setAddSheetOpen);
+
+  // Auth (online-only).
+  const authStatus = useAuthStore((s) => s.status);
+  const [authSheetOpen, setAuthSheetOpen] = useState(false);
 
   // Manual-pin and flyTo plumbing — owned by this screen, passed down to map.
   const [manualPinMode, setManualPinMode] = useState(false);
@@ -164,6 +183,17 @@ export default function MapScreen() {
     void loadUserPlaces();
   }, [loadUserPlaces]);
 
+  // Load cached community shelters once, then try to refresh from server when
+  // we're not in offline mode. The cache is what makes them visible offline.
+  useEffect(() => {
+    void loadCommunityFromCache();
+  }, [loadCommunityFromCache]);
+
+  useEffect(() => {
+    if (offlineMode) return;
+    void refreshCommunityFromServer();
+  }, [offlineMode, refreshCommunityFromServer, authStatus]);
+
   // Try browser geolocation once on web.
   useEffect(() => {
     if (Platform.OS !== 'web') return undefined;
@@ -207,6 +237,31 @@ export default function MapScreen() {
     },
     [selectDangerPoint],
   );
+
+  const handleSelectCommunityShelter = useCallback(
+    (s: CommunityShelter) => {
+      // Selecting a community shelter clears any other selection so only one
+      // detail sheet is visible at a time.
+      selectShelter(null);
+      selectUserPlace(null);
+      selectDangerPoint(null);
+      clearRoute();
+      selectCommunityShelter(s.id);
+    },
+    [clearRoute, selectCommunityShelter, selectDangerPoint, selectShelter, selectUserPlace],
+  );
+
+  const handleOpenShareShelter = useCallback(() => {
+    if (authStatus !== 'signed-in') {
+      setAuthSheetOpen(true);
+      return;
+    }
+    if (offlineMode) {
+      // Offline: still open the sheet so the user sees the rationale. The
+      // submit button is disabled inside the sheet when offline.
+    }
+    setCommunityAddSheetOpen(true);
+  }, [authStatus, offlineMode, setCommunityAddSheetOpen]);
 
   const handleNavigateDangerPoint = useCallback(() => {
     if (selectedDangerPoint) void navigateToDangerPoint(selectedDangerPoint);
@@ -270,6 +325,8 @@ export default function MapScreen() {
         selectedUserPlaceId={selectedUserPlaceId}
         dangerPoints={visibleDangerPoints}
         selectedDangerPointId={selectedDangerPointId}
+        communityShelters={communityShelters}
+        selectedCommunityShelterId={selectedCommunityShelterId}
         route={route}
         userLocation={userLocation}
         isLiveUserLocation={isLiveUserLocation}
@@ -280,6 +337,7 @@ export default function MapScreen() {
         onSelectShelter={handleSelectShelter}
         onSelectUserPlace={handleSelectUserPlace}
         onSelectDangerPoint={handleSelectDangerPoint}
+        onSelectCommunityShelter={handleSelectCommunityShelter}
         onCenterChange={handleCenterChange}
         recenterToken={recenterToken}
         fitRouteToken={fitRouteToken}
@@ -331,6 +389,13 @@ export default function MapScreen() {
               </Text>
             </View>
           ) : null}
+          {layerVisibility.communityShelters ? (
+            <View className="rounded-full bg-amber-500/15 border border-amber-500/40 px-2.5 py-1">
+              <Text className="text-[10.5px] font-semibold text-amber-300">
+                Community shelters (unverified) · {communityShelters.length}
+              </Text>
+            </View>
+          ) : null}
         </View>
       </SafeAreaView>
 
@@ -340,6 +405,7 @@ export default function MapScreen() {
         onToggleCrisis={toggleCrisisMode}
         onToggleOffline={toggleOfflineMode}
         onOpenInfo={() => setInfoOpen(true)}
+        rightSlot={<AccountChip onOpenAuth={() => setAuthSheetOpen(true)} />}
       />
 
       {/* Region filter + layer toggles */}
@@ -417,13 +483,15 @@ export default function MapScreen() {
         onToggleStyle={handleToggleStyle}
         onOpenSavedPlaces={() => setSavedPlacesPanelOpen(true)}
         onAddPlace={() => openAddPlace()}
+        onShareShelter={handleOpenShareShelter}
         mapStyleLabel={crisisMode ? 'Dark' : mapStyle === 'bright' ? 'Bright' : 'Dark'}
         savedPlacesCount={savedPlacesCount}
+        communityShelterCount={communityShelters.length}
         bottomInset={Platform.select({ web: 150, default: 170 }) ?? 170}
       />
 
       {/* Saved fallback shortcut pill */}
-      {!selectedShelter && !selectedUserPlace && !selectedDangerPoint && Object.keys(fallbacks).length > 0 ? (
+      {!selectedShelter && !selectedUserPlace && !selectedDangerPoint && !selectedCommunityShelterId && Object.keys(fallbacks).length > 0 ? (
         <View
           pointerEvents="box-none"
           style={{ position: 'absolute', left: 12, top: 178, zIndex: 14 }}
@@ -442,7 +510,7 @@ export default function MapScreen() {
         </View>
       ) : null}
 
-      {!selectedShelter && !selectedUserPlace && !selectedDangerPoint ? (
+      {!selectedShelter && !selectedUserPlace && !selectedDangerPoint && !selectedCommunityShelterId ? (
         <FindNearestFab
           onPress={handleFindNearest}
           loading={routeState === 'loading'}
@@ -498,6 +566,9 @@ export default function MapScreen() {
         }}
       />
       <AddPlaceSheet manualPin={manualPinHandle} />
+      <AddCommunityShelterSheet manualPin={manualPinHandle} />
+      <CommunityShelterSheet onCopyCoords={handleCopyCoords} />
+      <AuthSheet visible={authSheetOpen} onClose={() => setAuthSheetOpen(false)} />
       <InfoModal visible={infoOpen} onClose={() => setInfoOpen(false)} />
 
       {/* When the AddPlace sheet is in manual-pin mode, we hide the sheet via

@@ -16,6 +16,7 @@ type Props = {
   onToggleCrisis: () => void;
   onToggleOffline: () => void;
   onOpenInfo: () => void;
+  rightSlot?: React.ReactNode;
 };
 
 function Pill({
@@ -56,6 +57,7 @@ export function TopStatusBar({
   onToggleCrisis,
   onToggleOffline,
   onOpenInfo,
+  rightSlot,
 }: Props) {
   return (
     <SafeAreaView
@@ -94,6 +96,10 @@ export function TopStatusBar({
             <Info className="text-foreground" size={20} />
           </Pressable>
         </View>
+
+        {rightSlot ? (
+          <View className="absolute right-3 top-12 z-10">{rightSlot}</View>
+        ) : null}
 
         <View className="mt-2 flex-row flex-wrap gap-2">
           <Pill

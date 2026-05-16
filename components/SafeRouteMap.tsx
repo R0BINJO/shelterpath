@@ -28,6 +28,10 @@ import MapView, {
 import { SHELTER_COLORS } from '@/lib/constants';
 import { DEMO_DANGER_ZONE, type Shelter } from '@/lib/shelters';
 import type { DangerPoint } from '@/src/data/dangerPoints';
+import {
+  getCommunityShelterMeta,
+  type CommunityShelter,
+} from '@/src/types/communityShelters';
 import { getUserPlaceMeta, type UserPlace } from '@/src/types/userPlaces';
 
 import type { SafeRouteMapProps } from './SafeRouteMap.types';
@@ -50,6 +54,8 @@ export default function SafeRouteMap({
   selectedUserPlaceId,
   dangerPoints,
   selectedDangerPointId,
+  communityShelters,
+  selectedCommunityShelterId,
   route,
   userLocation,
   crisisMode,
@@ -58,6 +64,7 @@ export default function SafeRouteMap({
   onSelectShelter,
   onSelectUserPlace,
   onSelectDangerPoint,
+  onSelectCommunityShelter,
   recenterToken,
   fitRouteToken,
   flyToToken,
@@ -291,6 +298,39 @@ export default function SafeRouteMap({
                         backgroundColor: '#f97316',
                         borderColor: '#ffffff',
                         borderWidth: 2.5,
+                      }}
+                    />
+                  </Marker>
+                );
+              })
+          : null}
+
+        {/* COMMUNITY SHELTERS — unverified user submissions (amber houses). */}
+        {layerVisibility.communityShelters
+          ? communityShelters
+              .filter(
+                (s): s is CommunityShelter =>
+                  Number.isFinite(s.lat) && Number.isFinite(s.lng),
+              )
+              .map((cs) => {
+                const selected = cs.id === selectedCommunityShelterId;
+                const color = getCommunityShelterMeta(cs.shelterType).color;
+                return (
+                  <Marker
+                    key={`cs:${cs.id}`}
+                    coordinate={{ latitude: cs.lat, longitude: cs.lng }}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                    onPress={() => onSelectCommunityShelter(cs)}
+                    tracksViewChanges={selected}
+                  >
+                    <View
+                      style={{
+                        width: selected ? 32 : 24,
+                        height: selected ? 32 : 24,
+                        backgroundColor: color,
+                        borderColor: '#ffffff',
+                        borderWidth: 3,
+                        borderRadius: 4,
                       }}
                     />
                   </Marker>
