@@ -17,7 +17,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 import MapView, {
   Circle,
-  MAP_TYPES,
   Marker,
   Polyline,
   UrlTile,
@@ -113,7 +112,7 @@ export default function SafeRouteMap({
         ref={mapRef}
         style={{ flex: 1 }}
         initialRegion={initialRegion}
-        mapType={MAP_TYPES.STANDARD}
+        mapType="standard"
         showsUserLocation={false}
         showsCompass={false}
         showsPointsOfInterest={false}
