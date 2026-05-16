@@ -241,14 +241,14 @@ export default function MapScreen() {
   const handleSelectCommunityShelter = useCallback(
     (s: CommunityShelter) => {
       // Selecting a community shelter clears any other selection so only one
-      // detail sheet is visible at a time.
+      // detail sheet is visible at a time. Do NOT clear the route — the
+      // polyline must stay visible until the user starts a new route.
       selectShelter(null);
       selectUserPlace(null);
       selectDangerPoint(null);
-      clearRoute();
       selectCommunityShelter(s.id);
     },
-    [clearRoute, selectCommunityShelter, selectDangerPoint, selectShelter, selectUserPlace],
+    [selectCommunityShelter, selectDangerPoint, selectShelter, selectUserPlace],
   );
 
   const handleOpenShareShelter = useCallback(() => {
@@ -280,9 +280,10 @@ export default function MapScreen() {
   }, []);
 
   const handleCloseDangerPoint = useCallback(() => {
+    // Closing the sheet must NOT erase the active route — the polyline
+    // stays on the map until the user starts a new route or taps Clear.
     selectDangerPoint(null);
-    clearRoute();
-  }, [clearRoute, selectDangerPoint]);
+  }, [selectDangerPoint]);
 
   const handleFindNearest = useCallback(() => {
     void findNearest();
@@ -298,9 +299,10 @@ export default function MapScreen() {
   }, [saveFallback, selectedShelter]);
 
   const handleCloseSheet = useCallback(() => {
+    // Closing the sheet must NOT erase the active route — the polyline
+    // stays on the map until the user starts a new route or taps Clear.
     selectShelter(null);
-    clearRoute();
-  }, [clearRoute, selectShelter]);
+  }, [selectShelter]);
 
   const handleLocate = useCallback(() => {
     bumpRecenter();
@@ -482,6 +484,48 @@ export default function MapScreen() {
         communityShelterCount={communityShelters.length}
         bottomInset={Platform.select({ web: 150, default: 170 }) ?? 170}
       />
+
+      {/* Active-route shortcut pill — lets the user dismiss the persistent
+          polyline. Route stays on the map after closing the shelter sheet,
+          per UX: the route is visible at all times until cleared here. */}
+      {route && !selectedShelter && !selectedUserPlace && !selectedDangerPoint && !selectedCommunityShelterId ? (
+        <View
+          pointerEvents="box-none"
+          style={{ position: 'absolute', right: 12, top: 144, zIndex: 14 }}
+        >
+          <View className="flex-row items-center gap-1.5">
+            <Pressable
+              onPress={() => {
+                // Re-open the sheet for whichever destination the route targets.
+                const sid = route.shelterId;
+                if (sid.startsWith('userplace:')) {
+                  selectUserPlace(sid.slice('userplace:'.length));
+                } else if (sid.startsWith('dangerpoint:')) {
+                  selectDangerPoint(sid.slice('dangerpoint:'.length));
+                } else {
+                  selectShelter(sid);
+                }
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Reopen active route details"
+              className="rounded-full bg-emerald-500/15 border border-emerald-500/40 px-3 py-1.5 flex-row items-center gap-2"
+            >
+              <View className="h-2 w-2 rounded-full bg-emerald-400" />
+              <Text className="text-emerald-300 text-[11.5px] font-semibold">
+                Route active
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => clearRoute()}
+              accessibilityRole="button"
+              accessibilityLabel="Clear active route"
+              className="rounded-full bg-card/90 border border-border px-2.5 py-1.5 min-h-[28px] items-center justify-center"
+            >
+              <Text className="text-foreground text-[11.5px] font-semibold">Clear</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
 
       {/* Saved fallback shortcut pill */}
       {!selectedShelter && !selectedUserPlace && !selectedDangerPoint && !selectedCommunityShelterId && Object.keys(fallbacks).length > 0 ? (

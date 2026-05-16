@@ -213,13 +213,34 @@ export const useSafeRouteStore = create<SafeRouteState>()(
       familyMeetingPoint: '',
       emergencyNotes: '',
 
+      // NOTE on route persistence:
+      // Closing a detail sheet (id === null) must NOT erase the active route.
+      // The user explicitly asked for the route polyline to stay visible on
+      // the map at all times until they either start a new route or tap the
+      // dedicated Clear Route action. We therefore only reset routing state
+      // when switching to a DIFFERENT destination — and we detect "different"
+      // by comparing against the current route's destination id so that
+      // re-opening the sheet for the route's own target preserves the route.
       selectShelter: (id) =>
         set((s) => {
           if (id === s.selectedShelterId) return { selectedShelterId: id };
+          // Closing: keep route + showRoute intact.
+          if (id === null) {
+            return { selectedShelterId: null };
+          }
+          // Re-selecting the shelter that the active route targets: keep route.
+          if (s.route && s.route.shelterId === id) {
+            return {
+              selectedShelterId: id,
+              selectedUserPlaceId: null,
+              selectedDangerPointId: null,
+            };
+          }
+          // Switching to a different shelter: clear stale route.
           return {
             selectedShelterId: id,
-            selectedUserPlaceId: id ? null : s.selectedUserPlaceId,
-            selectedDangerPointId: id ? null : s.selectedDangerPointId,
+            selectedUserPlaceId: null,
+            selectedDangerPointId: null,
             showRoute: false,
             route: null,
             routeState: 'idle',
@@ -231,32 +252,60 @@ export const useSafeRouteStore = create<SafeRouteState>()(
         }),
 
       selectUserPlace: (id) =>
-        set((s) => ({
-          selectedUserPlaceId: id,
-          selectedShelterId: id ? null : s.selectedShelterId,
-          selectedDangerPointId: id ? null : s.selectedDangerPointId,
-          showRoute: false,
-          route: null,
-          routeState: 'idle',
-          routeError: null,
-          routeStart: null,
-          routeStartLabel: null,
-          routeDangerHits: [],
-        })),
+        set((s) => {
+          if (id === s.selectedUserPlaceId) return { selectedUserPlaceId: id };
+          if (id === null) {
+            return { selectedUserPlaceId: null };
+          }
+          // Re-selecting the user place the active route targets: keep route.
+          if (s.route && s.route.shelterId === `userplace:${id}`) {
+            return {
+              selectedUserPlaceId: id,
+              selectedShelterId: null,
+              selectedDangerPointId: null,
+            };
+          }
+          return {
+            selectedUserPlaceId: id,
+            selectedShelterId: null,
+            selectedDangerPointId: null,
+            showRoute: false,
+            route: null,
+            routeState: 'idle',
+            routeError: null,
+            routeStart: null,
+            routeStartLabel: null,
+            routeDangerHits: [],
+          };
+        }),
 
       selectDangerPoint: (id) =>
-        set((s) => ({
-          selectedDangerPointId: id,
-          selectedShelterId: id ? null : s.selectedShelterId,
-          selectedUserPlaceId: id ? null : s.selectedUserPlaceId,
-          showRoute: false,
-          route: null,
-          routeState: 'idle',
-          routeError: null,
-          routeStart: null,
-          routeStartLabel: null,
-          routeDangerHits: [],
-        })),
+        set((s) => {
+          if (id === s.selectedDangerPointId) return { selectedDangerPointId: id };
+          if (id === null) {
+            return { selectedDangerPointId: null };
+          }
+          // Re-selecting the danger point the active route targets: keep route.
+          if (s.route && s.route.shelterId === `dangerpoint:${id}`) {
+            return {
+              selectedDangerPointId: id,
+              selectedShelterId: null,
+              selectedUserPlaceId: null,
+            };
+          }
+          return {
+            selectedDangerPointId: id,
+            selectedShelterId: null,
+            selectedUserPlaceId: null,
+            showRoute: false,
+            route: null,
+            routeState: 'idle',
+            routeError: null,
+            routeStart: null,
+            routeStartLabel: null,
+            routeDangerHits: [],
+          };
+        }),
 
       navigateToShelter: async (shelter) => {
         const { userLocation, offlineMode } = get();
