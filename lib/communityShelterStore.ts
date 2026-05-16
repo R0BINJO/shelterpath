@@ -26,7 +26,7 @@ const META_KEY = 'saferoute.communityShelters.meta.v1';
 
 // Build marker — bump this when the share-auth code path changes so stale
 // bundles are easy to spot in the dev diagnostics panel.
-export const COMMUNITY_SHELTER_BUILD_ID = 'shelter-share-auth-fix-v1';
+export const COMMUNITY_SHELTER_BUILD_ID = 'shelter-share-auth-fix-v2';
 
 // ── Dev diagnostics ────────────────────────────────────────────────────────
 // Logged only in development. NEVER logs the JWT access_token, refresh_token,
@@ -52,21 +52,40 @@ type SupabaseInsertError = {
 
 function mapSupabaseInsertError(err: SupabaseInsertError): string {
   if (!err) return 'Could not submit shelter.';
-  const code = err.code ?? '';
-  const msg = (err.message ?? '').toLowerCase();
-  if (code === 'PGRST205' || msg.includes('schema cache')) {
-    return 'Database schema cache error. Try refreshing the app.';
+  const code = (err.code ?? '').trim();
+  const rawMsg = err.message ?? '';
+  const msg = rawMsg.toLowerCase();
+
+  // RLS — the most common real-world failure. Check this BEFORE the schema-cache
+  // check because supabase-js error messages sometimes contain the word
+  // "schema" in the context of permission errors.
+  if (code === '42501' || msg.includes('row-level security') || msg.includes('rls')) {
+    return 'You need an authenticated session before sharing. Sign out and back in, then try again.';
   }
-  if (code === '42501' || msg.includes('row-level security')) {
-    return 'You need an authenticated session before sharing.';
+
+  // Strictly match PGRST205 (PostgREST's "table missing from schema cache"
+  // error code) — never fall back to substring matching on the word "schema".
+  if (code === 'PGRST205') {
+    return 'Database schema not ready yet. Refresh the app and try again.';
   }
+
   if (msg.includes('jwt') || msg.includes('expired') || msg.includes('invalid token')) {
     return 'Your sign-in session expired. Sign in again to share a shelter.';
   }
-  if (msg.includes('network') || msg.includes('failed to fetch')) {
+  if (
+    msg.includes('failed to fetch') ||
+    msg.includes('network request failed') ||
+    msg.includes('network error') ||
+    msg.includes('typeerror: fetch')
+  ) {
     return 'No internet. Sharing a shelter needs a connection.';
   }
-  return err.message ?? 'Could not submit shelter.';
+
+  // Surface the real Supabase message verbatim so the user sees what's actually
+  // wrong (e.g. "duplicate key", "value too long", "check constraint") rather
+  // than the misleading schema-cache fallback.
+  if (rawMsg) return rawMsg;
+  return 'Could not submit shelter.';
 }
 
 type CachedMeta = {
@@ -261,25 +280,43 @@ export const useCommunityShelterStore = create<CommunityState>((set, get) => ({
       table: 'community_shelters',
     });
 
-    const { data, error } = await supabase
-      .from('community_shelters')
-      .insert({
-        // RLS policy: auth.uid() = submitted_by. The id MUST come from the
-        // live session, never from auth.getUser() (which can return null
-        // during cold start) and never from local storage.
-        submitted_by: session.user.id,
-        name: input.name,
-        shelter_type: input.shelterType,
-        notes: input.notes,
-        capacity_estimate: input.capacityEstimate,
-        address: input.address,
-        lat: input.lat,
-        lng: input.lng,
-      })
-      .select(
-        'id, submitted_by, name, shelter_type, notes, capacity_estimate, address, lat, lng, created_at, updated_at',
-      )
-      .single<CommunityShelterRow>();
+    const insertPayload = {
+      // RLS policy: auth.uid() = submitted_by. The id MUST come from the
+      // live session, never from auth.getUser() (which can return null
+      // during cold start) and never from local storage.
+      submitted_by: session.user.id,
+      name: input.name,
+      shelter_type: input.shelterType,
+      notes: input.notes,
+      capacity_estimate: input.capacityEstimate,
+      address: input.address,
+      lat: input.lat,
+      lng: input.lng,
+    };
+
+    const doInsert = () =>
+      supabase
+        .from('community_shelters')
+        .insert(insertPayload)
+        .select(
+          'id, submitted_by, name, shelter_type, notes, capacity_estimate, address, lat, lng, created_at, updated_at',
+        )
+        .single<CommunityShelterRow>();
+
+    let { data, error } = await doInsert();
+
+    // Self-heal: PostgREST occasionally returns PGRST205 ("table missing from
+    // schema cache") right after a deploy. PostgREST polls for schema changes
+    // every few seconds, so a single retry after a short delay almost always
+    // succeeds without the user having to refresh the app.
+    if (error && error.code === 'PGRST205') {
+      logDiag('schema_cache_miss_retry', { code: error.code, message: error.message });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const retry = await doInsert();
+      data = retry.data;
+      error = retry.error;
+    }
+
     if (error || !data) {
       logDiag('insert_error', {
         code: error?.code ?? null,
