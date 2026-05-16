@@ -37,7 +37,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
 import { useAuthStore } from '@/lib/authStore';
-import { useCommunityShelterStore } from '@/lib/communityShelterStore';
+import {
+  COMMUNITY_SHELTER_BUILD_ID,
+  useCommunityShelterStore,
+} from '@/lib/communityShelterStore';
 import { useSafeRouteStore } from '@/lib/saferouteStore';
 import { cn } from '@/lib/utils';
 import {
@@ -71,6 +74,15 @@ export function AddCommunityShelterSheet({ manualPin }: Props) {
   const isLiveUserLocation = useSafeRouteStore((s) => s.isLiveUserLocation);
 
   const authStatus = useAuthStore((s) => s.status);
+  const authUserId = useAuthStore((s) => s.userId);
+
+  // Project ref (NOT the key) for the dev diagnostics line. Showing it on the
+  // sheet makes it obvious if the running bundle is talking to the wrong
+  // Supabase project.
+  const projectRef = useMemo(() => {
+    const raw = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+    return raw.replace(/^https?:\/\//, '').split('.')[0] || 'unknown';
+  }, []);
 
   const [stage, setStage] = useState<Stage>('form');
   const [name, setName] = useState('');
@@ -424,6 +436,21 @@ export function AddCommunityShelterSheet({ manualPin }: Props) {
                     <AlertCircle color="#ef4444" size={14} />
                     <Text className="text-destructive text-[12px] font-semibold flex-1">
                       {error}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {__DEV__ ? (
+                  <View className="mt-3 rounded-xl bg-secondary border border-border px-3 py-2">
+                    <Text className="text-muted-foreground text-[10.5px] font-semibold uppercase tracking-wider">
+                      Dev diagnostics
+                    </Text>
+                    <Text className="text-muted-foreground text-[10.5px] mt-1 leading-[14px]">
+                      Build: {COMMUNITY_SHELTER_BUILD_ID}
+                      {'\n'}Project: {projectRef}
+                      {'\n'}Session: {authStatus === 'signed-in' ? 'yes' : 'no'}
+                      {'\n'}User id: {authUserId ?? '—'}
+                      {'\n'}Table: community_shelters
                     </Text>
                   </View>
                 ) : null}

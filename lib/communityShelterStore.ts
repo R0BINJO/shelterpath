@@ -24,6 +24,51 @@ import type { CommunityShelter } from '@/src/types/communityShelters';
 const CACHE_KEY = 'saferoute.communityShelters.v1';
 const META_KEY = 'saferoute.communityShelters.meta.v1';
 
+// Build marker — bump this when the share-auth code path changes so stale
+// bundles are easy to spot in the dev diagnostics panel.
+export const COMMUNITY_SHELTER_BUILD_ID = 'shelter-share-auth-fix-v1';
+
+// ── Dev diagnostics ────────────────────────────────────────────────────────
+// Logged only in development. NEVER logs the JWT access_token, refresh_token,
+// or any user PII. The user id is logged because RLS errors are usually
+// caused by the wrong / missing user id and you can't debug without it.
+function logDiag(event: string, payload?: unknown) {
+  if (!__DEV__) return;
+  // eslint-disable-next-line no-console
+  console.log(`[community-shelter:${COMMUNITY_SHELTER_BUILD_ID}] ${event}`, payload ?? '');
+}
+
+function getProjectUrl(): string {
+  const raw = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+  // Project ref only — never log keys.
+  return raw.replace(/^https?:\/\//, '').split('.')[0] || 'unknown';
+}
+
+type SupabaseInsertError = {
+  code?: string | null;
+  message?: string | null;
+  details?: string | null;
+} | null;
+
+function mapSupabaseInsertError(err: SupabaseInsertError): string {
+  if (!err) return 'Could not submit shelter.';
+  const code = err.code ?? '';
+  const msg = (err.message ?? '').toLowerCase();
+  if (code === 'PGRST205' || msg.includes('schema cache')) {
+    return 'Database schema cache error. Try refreshing the app.';
+  }
+  if (code === '42501' || msg.includes('row-level security')) {
+    return 'You need an authenticated session before sharing.';
+  }
+  if (msg.includes('jwt') || msg.includes('expired') || msg.includes('invalid token')) {
+    return 'Your sign-in session expired. Sign in again to share a shelter.';
+  }
+  if (msg.includes('network') || msg.includes('failed to fetch')) {
+    return 'No internet. Sharing a shelter needs a connection.';
+  }
+  return err.message ?? 'Could not submit shelter.';
+}
+
 type CachedMeta = {
   lastFetchedAt: string | null;
 };
@@ -193,12 +238,36 @@ export const useCommunityShelterStore = create<CommunityState>((set, get) => ({
   },
 
   submit: async (input) => {
+    // ── Session guard ──────────────────────────────────────────────────────
+    // The Supabase test confirmed an authenticated INSERT succeeds, while
+    // anonymous INSERT fails with RLS (42501). Make absolutely sure we have a
+    // live access token + user id BEFORE attempting the insert, so we can
+    // surface a precise error instead of the misleading "schema cache" one.
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) {
+      logDiag('session_error', sessionError.message);
+      throw new Error('Could not read your sign-in session. Try signing out and back in.');
+    }
+    const session = sessionData.session;
+    if (!session || !session.user?.id || !session.access_token) {
+      logDiag('no_session', 'submit called without an authenticated session');
+      throw new Error('Sign in is required before sharing a shelter.');
+    }
+
+    logDiag('insert_attempt', {
+      projectUrl: getProjectUrl(),
+      hasSession: true,
+      userId: session.user.id,
+      table: 'community_shelters',
+    });
+
     const { data, error } = await supabase
       .from('community_shelters')
       .insert({
-        // submitted_by is enforced via RLS to equal auth.uid(); we still pass
-        // it so the row check matches.
-        submitted_by: (await supabase.auth.getUser()).data.user?.id ?? '',
+        // RLS policy: auth.uid() = submitted_by. The id MUST come from the
+        // live session, never from auth.getUser() (which can return null
+        // during cold start) and never from local storage.
+        submitted_by: session.user.id,
         name: input.name,
         shelter_type: input.shelterType,
         notes: input.notes,
@@ -212,7 +281,12 @@ export const useCommunityShelterStore = create<CommunityState>((set, get) => ({
       )
       .single<CommunityShelterRow>();
     if (error || !data) {
-      throw new Error(error?.message ?? 'Could not submit shelter');
+      logDiag('insert_error', {
+        code: error?.code ?? null,
+        message: error?.message ?? null,
+        details: error?.details ?? null,
+      });
+      throw new Error(mapSupabaseInsertError(error));
     }
 
     // Pull the submitter's display name for the local cache row.
