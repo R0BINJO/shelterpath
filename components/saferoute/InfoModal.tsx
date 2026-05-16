@@ -80,10 +80,10 @@ export function InfoModal({
                 </Text>
                 <Text className="text-amber-200/90 text-[11.5px] mt-1 leading-[16px]">
                   Map tiles load from OpenFreeMap (OSM-based, no API key) when
-                  online. Live walking routes use the public OSRM demo endpoint
-                  (router.project-osrm.org). When OSRM is unavailable the app
-                  falls back to a straight-line distance estimate, clearly
-                  labelled. The hardcoded danger zone is visual only.
+                  online. Walking routes are direct great-circle lines — on
+                  foot in a crisis you go in any direction, over streets,
+                  parks, and squares. Distance and time are estimates. The
+                  hardcoded danger zone is visual only.
                 </Text>
               </View>
 
