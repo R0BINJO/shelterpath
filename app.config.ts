@@ -10,13 +10,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   return {
     ...config,
-    name: 'Your App Name',
-    slug: 'your-app-slug',
+    name: 'ShelterPath',
+    slug: 'shelterpath',
     newArchEnabled: true,
     version: '1.0.0',
     orientation: 'portrait',
     userInterfaceStyle: 'automatic',
-    scheme: 'yourapp',
+    scheme: 'shelterpath',
     runtimeVersion: {
       policy: 'appVersion',
     },
@@ -26,10 +26,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         ITSAppUsesNonExemptEncryption: false,
       },
       supportsTablet: true,
-      bundleIdentifier: 'com.yourcompany.yourapp',
+      bundleIdentifier: 'me.bilt.shelterpath',
     },
     android: {
-      package: 'com.yourcompany.yourapp',
+      package: 'me.bilt.shelterpath',
     },
     plugins: ['expo-router', 'expo-font', ...nativePlugins],
     experiments: {
