@@ -227,24 +227,18 @@ export function AddCommunityShelterSheet({ manualPin }: Props) {
       onRequestClose={() => setAddSheetOpen(false)}
     >
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }}>
-        <SafeAreaView
-          edges={['bottom']}
-          style={{ flex: 1, justifyContent: 'flex-end' }}
-          pointerEvents="box-none"
-        >
-          {/* Dismiss-on-tap backdrop. Lives ABOVE the sheet in DOM order but
-              uses flex:1 so the sheet (rendered after) sits on top in the
-              vertical stack. Tapping the dim area dismisses; the sheet itself
-              keeps full pointer access for the TextInputs. */}
-          <Pressable
-            onPress={() => setAddSheetOpen(false)}
-            accessibilityLabel="Dismiss"
-            style={{ flex: 1 }}
-          />
+        {/* Dismiss-on-tap backdrop. flex:1 so the sheet (rendered after) sits
+            below it in the vertical stack. The sheet itself keeps full pointer
+            access for the TextInputs because it's a separate sibling. */}
+        <Pressable
+          onPress={() => setAddSheetOpen(false)}
+          accessibilityLabel="Dismiss"
+          style={{ flex: 1 }}
+        />
+        <SafeAreaView edges={['bottom']} style={{ backgroundColor: 'transparent' }}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View
-              className="bg-card border-t border-x border-border rounded-t-3xl overflow-hidden"
-              style={{ maxHeight: '92%' }}
+              className="bg-card border-t border-x border-border rounded-t-3xl overflow-hidden max-h-[88vh]"
             >
               <View className="flex-row items-center justify-between px-5 pt-4 pb-2">
                 <View className="flex-row items-center gap-2">
