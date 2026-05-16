@@ -274,7 +274,9 @@ export function AuthSheet({ visible, onClose }: Props) {
                       }
                     />
                     <Text className="text-muted-foreground text-[11px] leading-[16px] mt-1">
-                      We&apos;ll email you a 6-digit code to confirm the account.
+                      We&apos;ll email you a 6-digit code. Come back to this
+                      screen and type the code — don&apos;t click the
+                      confirmation link in the email.
                     </Text>
                   </View>
                 ) : null}
@@ -321,6 +323,17 @@ export function AuthSheet({ visible, onClose }: Props) {
                       Enter the 6-digit code we sent to{' '}
                       <Text className="text-foreground font-semibold">{email}</Text>.
                     </Text>
+                    <View className="rounded-xl bg-amber-500/15 border border-amber-500/40 px-3 py-2">
+                      <Text className="text-amber-200 text-[12px] font-semibold leading-[17px]">
+                        Type the 6-digit code from the email here.
+                      </Text>
+                      <Text className="text-amber-100/90 text-[11.5px] leading-[16px] mt-1">
+                        Do NOT click the &quot;Confirm your mail&quot; link in
+                        the email — that link redirects to a generic Supabase
+                        page and will not finish sign-up inside this app. The
+                        code is the 6-digit number in the same email.
+                      </Text>
+                    </View>
                     <Field label="6-digit code">
                       <TextInput
                         value={otp}
