@@ -20,14 +20,14 @@ import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AccountChip } from '@/components/saferoute/AccountChip';
+import { ActionsMenu } from '@/components/saferoute/ActionsMenu';
 import { AddCommunityShelterSheet } from '@/components/saferoute/AddCommunityShelterSheet';
 import { AuthSheet } from '@/components/saferoute/AuthSheet';
 import { CommunityShelterSheet } from '@/components/saferoute/CommunityShelterSheet';
-import { DangerLayerFilterChips } from '@/components/saferoute/DangerLayerFilterChips';
 import { DangerPointSheet } from '@/components/saferoute/DangerPointSheet';
-import { FindNearestFab, MapFabStack } from '@/components/saferoute/FloatingControls';
+import { FindNearestFab } from '@/components/saferoute/FloatingControls';
 import { InfoModal } from '@/components/saferoute/InfoModal';
-import { LayerToggleChips } from '@/components/saferoute/LayerToggleChips';
+import { LayersMenu } from '@/components/saferoute/LayersMenu';
 import { OfflinePlanModal } from '@/components/saferoute/OfflinePlanModal';
 import { AddPlaceSheet } from '@/components/saferoute/AddPlaceSheet';
 import {
@@ -408,7 +408,7 @@ export default function MapScreen() {
         rightSlot={<AccountChip onOpenAuth={() => setAuthSheetOpen(true)} />}
       />
 
-      {/* Region filter + layer toggles */}
+      {/* Region filter + Layers popup trigger */}
       <SafeAreaView
         edges={['top']}
         pointerEvents="box-none"
@@ -419,6 +419,12 @@ export default function MapScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
         >
+          <LayersMenu
+            layers={layerVisibility}
+            onToggle={toggleLayer}
+            dangerFilter={dangerLayerFilter}
+            onDangerFilterChange={setDangerLayerFilter}
+          />
           {REGION_OPTIONS.map((opt) => {
             const active = region === opt.value;
             return (
@@ -444,19 +450,6 @@ export default function MapScreen() {
             );
           })}
         </ScrollView>
-
-        <View className="px-3 mt-1.5">
-          <LayerToggleChips layers={layerVisibility} onToggle={toggleLayer} />
-        </View>
-
-        {layerVisibility.dangerPoints || layerVisibility.dangerZones ? (
-          <View className="mt-1.5">
-            <DangerLayerFilterChips
-              value={dangerLayerFilter}
-              onChange={setDangerLayerFilter}
-            />
-          </View>
-        ) : null}
       </SafeAreaView>
 
       {/* Persistent disclaimer */}
@@ -477,7 +470,7 @@ export default function MapScreen() {
         </View>
       </View>
 
-      <MapFabStack
+      <ActionsMenu
         onLocate={handleLocate}
         onOpenPlan={() => setOfflinePlanOpen(true)}
         onToggleStyle={handleToggleStyle}
@@ -494,7 +487,7 @@ export default function MapScreen() {
       {!selectedShelter && !selectedUserPlace && !selectedDangerPoint && !selectedCommunityShelterId && Object.keys(fallbacks).length > 0 ? (
         <View
           pointerEvents="box-none"
-          style={{ position: 'absolute', left: 12, top: 178, zIndex: 14 }}
+          style={{ position: 'absolute', left: 12, top: 144, zIndex: 14 }}
         >
           <Pressable
             onPress={() => setOfflinePlanOpen(true)}
