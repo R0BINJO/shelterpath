@@ -111,6 +111,10 @@ export default function SafeRouteMap({
   sheltersRef.current = shelters;
   const selectedRef = useRef(selectedShelterId);
   selectedRef.current = selectedShelterId;
+  const routeRef = useRef(route);
+  routeRef.current = route;
+  const userLocationRef = useRef(userLocation);
+  userLocationRef.current = userLocation;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return undefined;
@@ -145,6 +149,7 @@ export default function SafeRouteMap({
 
     map.on('styledata', () => {
       if (map.isStyleLoaded()) {
+        styleLoadedRef.current = true;
         attachLayers(map);
       }
     });
@@ -203,6 +208,11 @@ export default function SafeRouteMap({
   }, [fitRouteToken, route]);
 
   function attachLayers(map: MaplibreMap) {
+    const currentShelters = sheltersRef.current;
+    const currentSelected = selectedRef.current;
+    const currentRoute = routeRef.current;
+    const currentUser = userLocationRef.current;
+
     if (!map.getSource('saferoute-danger')) {
       map.addSource('saferoute-danger', { type: 'geojson', data: dangerCirclePolygon() });
       map.addLayer({
@@ -250,7 +260,7 @@ export default function SafeRouteMap({
         data: {
           type: 'Feature',
           properties: {},
-          geometry: { type: 'Point', coordinates: [userLocation.lng, userLocation.lat] },
+          geometry: { type: 'Point', coordinates: [currentUser.lng, currentUser.lat] },
         },
       });
       map.addLayer({
@@ -279,7 +289,7 @@ export default function SafeRouteMap({
     if (!map.getSource('saferoute-shelters')) {
       map.addSource('saferoute-shelters', {
         type: 'geojson',
-        data: sheltersToGeoJson(shelters),
+        data: sheltersToGeoJson(currentShelters),
         cluster: true,
         clusterRadius: 48,
         clusterMaxZoom: 12,
@@ -331,7 +341,7 @@ export default function SafeRouteMap({
         paint: {
           'circle-radius': [
             'case',
-            ['==', ['get', 'id'], selectedShelterId ?? ''],
+            ['==', ['get', 'id'], currentSelected ?? ''],
             22,
             0,
           ],
@@ -347,7 +357,7 @@ export default function SafeRouteMap({
         paint: {
           'circle-radius': [
             'case',
-            ['==', ['get', 'id'], selectedShelterId ?? ''],
+            ['==', ['get', 'id'], currentSelected ?? ''],
             14,
             10,
           ],
@@ -391,10 +401,10 @@ export default function SafeRouteMap({
     }
 
     updateData(map, {
-      shelters,
-      selectedShelterId,
-      routeCoords: route?.coordinates ?? null,
-      userLocation,
+      shelters: currentShelters,
+      selectedShelterId: currentSelected,
+      routeCoords: currentRoute?.coordinates ?? null,
+      userLocation: currentUser,
     });
   }
 
