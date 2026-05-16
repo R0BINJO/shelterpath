@@ -82,9 +82,11 @@ export function AddCommunityShelterSheet({ manualPin }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Reset form state only when the sheet is fully closed AND we're not in the
+  // middle of letting the user drop a pin on the map (we temporarily close
+  // the modal during the 'manual' stage so the map is visible underneath).
   useEffect(() => {
-    if (!addSheetOpen) {
-      // reset on close
+    if (!addSheetOpen && stage !== 'manual') {
       setStage('form');
       setName('');
       setType('basement');
@@ -96,7 +98,7 @@ export function AddCommunityShelterSheet({ manualPin }: Props) {
       setError(null);
       manualPin.setManualPinMode(false);
     }
-  }, [addSheetOpen, manualPin]);
+  }, [addSheetOpen, stage, manualPin]);
 
   const useCurrentLocation = () => {
     if (!isLiveUserLocation) {
