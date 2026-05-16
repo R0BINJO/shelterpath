@@ -163,7 +163,10 @@ export default function RootLayout() {
         <GestureHandlerRootView style={{ flex: 1 }}>
           <ToastProvider>
             <Stack>
-              <Stack.Screen name="(tabs)" options={{ title: 'Habits', headerShown: false }} />
+              <Stack.Screen
+                name="(tabs)"
+                options={{ title: 'SafeRoute Varjumine', headerShown: false }}
+              />
             </Stack>
           </ToastProvider>
         </GestureHandlerRootView>

@@ -5,54 +5,56 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Ensure Inter font is available for web, especially when running through proxy */
-/* The @import above loads Inter from Google Fonts CDN */
-/* expo-font will register the font family names (Inter_400Regular, etc.) */
-/* If expo-font fails, the browser will still have Inter loaded and can use it as fallback */
+/*
+ * SafeRoute Varjumine — calm dark crisis palette
+ * Light mode is acceptable, but defaults skew toward a high-contrast, calm dark UI.
+ * Primary accent: bright route-blue. Status pills/danger use semantic tones.
+ */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    --background: 210 25% 97%;
+    --foreground: 215 30% 12%;
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
+    --card-foreground: 215 30% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
-    --radius: 0.5rem;
+    --popover-foreground: 215 30% 12%;
+    --primary: 212 95% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 20% 92%;
+    --secondary-foreground: 215 30% 18%;
+    --muted: 215 20% 92%;
+    --muted-foreground: 215 15% 42%;
+    --accent: 212 90% 94%;
+    --accent-foreground: 212 95% 32%;
+    --destructive: 0 75% 52%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 20% 86%;
+    --input: 215 20% 86%;
+    --ring: 212 95% 50%;
+    --radius: 0.875rem;
   }
 
   .dark:root {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    --background: 215 35% 8%;
+    --foreground: 210 20% 96%;
+    --card: 215 30% 12%;
+    --card-foreground: 210 20% 96%;
+    --popover: 215 30% 13%;
+    --popover-foreground: 210 20% 96%;
+    --primary: 210 100% 60%;
+    --primary-foreground: 215 35% 8%;
+    --secondary: 215 25% 18%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 215 25% 16%;
+    --muted-foreground: 215 15% 65%;
+    --accent: 212 70% 22%;
+    --accent-foreground: 210 100% 80%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 25% 20%;
+    --input: 215 25% 20%;
+    --ring: 210 100% 60%;
+    --radius: 0.875rem;
   }
 }
