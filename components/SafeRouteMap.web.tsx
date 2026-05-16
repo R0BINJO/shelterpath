@@ -115,6 +115,7 @@ export default function SafeRouteMap({
   routeRef.current = route;
   const userLocationRef = useRef(userLocation);
   userLocationRef.current = userLocation;
+  const isFirstStyleEffect = useRef(true);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return undefined;
@@ -142,17 +143,15 @@ export default function SafeRouteMap({
       'top-right',
     );
 
-    map.on('load', () => {
+    // `style.load` fires once per style load (initial + every setStyle).
+    // It's more reliable than `styledata`, which can fire many times during a
+    // style transition with `isStyleLoaded()` flipping mid-stream.
+    const handleStyleLoad = () => {
       styleLoadedRef.current = true;
       attachLayers(map);
-    });
-
-    map.on('styledata', () => {
-      if (map.isStyleLoaded()) {
-        styleLoadedRef.current = true;
-        attachLayers(map);
-      }
-    });
+    };
+    map.on('load', handleStyleLoad);
+    map.on('style.load', handleStyleLoad);
 
     mapRef.current = map;
     return () => {
@@ -163,12 +162,22 @@ export default function SafeRouteMap({
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- init-once effect
   }, []);
 
-  // Switch style when crisis mode flips.
+  // Switch style when crisis mode / map style flips. Mark style as unloaded
+  // so the data-update effect skips until `style.load` re-attaches sources.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    map.setStyle(STYLE_URLS[crisisMode ? 'dark' : mapStyle]);
+    // Skip the very first run — the initial style is set at construction time.
+    if (isFirstStyleEffect.current) {
+      isFirstStyleEffect.current = false;
+      return;
+    }
     styleLoadedRef.current = false;
+    // `diff: false` forces a full rebuild so custom sources/layers we added
+    // imperatively (shelters / route / user / danger) are guaranteed to be
+    // wiped. We re-attach them inside the `style.load` handler — that single
+    // event reliably fires once the new style is fully loaded.
+    map.setStyle(STYLE_URLS[crisisMode ? 'dark' : mapStyle], { diff: false });
   }, [crisisMode, mapStyle]);
 
   // Push data updates whenever shelters / route / selection / user-location change.
