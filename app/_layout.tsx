@@ -65,7 +65,11 @@ export default function RootLayout() {
       try {
         const theme = await AsyncStorage.getItem('theme');
         if (!theme) {
-          await AsyncStorage.setItem('theme', colorScheme);
+          // Default to light mode on first launch.
+          await AsyncStorage.setItem('theme', 'light');
+          if (colorScheme !== 'light') {
+            setColorScheme('light');
+          }
           return;
         }
         const colorTheme = theme === 'dark' ? 'dark' : 'light';
