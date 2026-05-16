@@ -1,136 +1,34 @@
 /*
  * SafeRoute Varjumine — Offline Plan modal.
  *
- * Lets the user pin saved fallback shelters (home / work / school / generic),
- * a family meeting point and emergency notes. All values persist to
- * AsyncStorage via lib/saferouteStore.ts (the RN equivalent of localStorage).
+ * Lists the user's locally saved places (home / work / school / family / other)
+ * with quick route actions, plus family meeting point and emergency notes.
+ * All values persist to AsyncStorage via lib/saferouteStore.ts.
  *
- * Saved fallback shelters store id, name, address, lat, lng, snapshot date and
- * a saved-at timestamp so the offline view still works when the dataset is
- * not loaded.
+ * Saved places are private user-created records (SAVED PLACES WORK OFFLINE
+ * AFTER SAVING). The modal does NOT force the user to pre-pin shelters per
+ * slot — not everyone has a school or a workplace.
  *
  * "Last downloaded map" is a HARDCODED demo timestamp — no real tiles are stored.
  */
 
-import { Briefcase, Bookmark, GraduationCap, Home, Plus, Users, X } from 'lucide-react-native';
-import { useMemo, useState } from 'react';
+import {
+  Bookmark,
+  MapPin,
+  Navigation,
+  Plus,
+  Shield,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-react-native';
 import { Modal, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
-import {
-  DEMO_LAST_MAP_DOWNLOAD,
-  haversineMeters,
-  SHELTERS,
-  type Shelter,
-} from '@/lib/shelters';
-import {
-  type FallbackSlot,
-  type SavedFallback,
-  useSafeRouteStore,
-} from '@/lib/saferouteStore';
-import { USER_PLACE_TYPE_META } from '@/src/types/userPlaces';
-
-type SlotMeta = {
-  slot: FallbackSlot;
-  label: string;
-  icon: React.ReactNode;
-};
-
-const SLOTS: SlotMeta[] = [
-  { slot: 'home', label: 'Home fallback', icon: <Home color="#60a5fa" size={18} /> },
-  { slot: 'work', label: 'Work fallback', icon: <Briefcase color="#a78bfa" size={18} /> },
-  {
-    slot: 'school',
-    label: 'School fallback',
-    icon: <GraduationCap color="#34d399" size={18} />,
-  },
-  {
-    slot: 'generic',
-    label: 'Other saved shelter',
-    icon: <Bookmark color="#fbbf24" size={18} />,
-  },
-];
-
-function SlotRow({
-  meta,
-  saved,
-  candidates,
-  onPick,
-  onClear,
-}: {
-  meta: SlotMeta;
-  saved: SavedFallback | undefined;
-  candidates: Shelter[];
-  onPick: (shelter: Shelter) => void;
-  onClear: () => void;
-}) {
-  return (
-    <View className="rounded-xl border border-border bg-secondary/40 px-3 py-3 mb-2">
-      <View className="flex-row items-center gap-2 mb-2">
-        {meta.icon}
-        <Text className="text-foreground text-[13px] font-semibold flex-1">
-          {meta.label}
-        </Text>
-        {saved ? (
-          <Pressable
-            onPress={onClear}
-            accessibilityRole="button"
-            accessibilityLabel={`Clear ${meta.label}`}
-            className="h-7 px-2.5 items-center justify-center rounded-full bg-card border border-border"
-          >
-            <Text className="text-[11px] text-muted-foreground">Clear</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      {saved ? (
-        <View className="mb-2">
-          <Text className="text-foreground text-[12.5px]" numberOfLines={1}>
-            {saved.shelterName}
-          </Text>
-          <Text className="text-muted-foreground text-[11px] mt-0.5" numberOfLines={1}>
-            {saved.shelterAddress}
-          </Text>
-          <Text className="text-muted-foreground text-[10px] mt-0.5">
-            Saved {new Date(saved.savedAt).toLocaleDateString()} · snapshot{' '}
-            {saved.dataSnapshotDate}
-          </Text>
-        </View>
-      ) : (
-        <Text className="text-muted-foreground text-[12px] mb-2">Not set</Text>
-      )}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <View className="flex-row gap-2">
-          {candidates.map((s) => {
-            const active = saved?.shelterId === s.id;
-            return (
-              <Pressable
-                key={s.id}
-                onPress={() => onPick(s)}
-                accessibilityRole="button"
-                accessibilityLabel={`Pick ${s.name}`}
-                className={
-                  'rounded-full border px-3 py-1.5 ' +
-                  (active ? 'bg-primary border-primary' : 'bg-card border-border')
-                }
-              >
-                <Text
-                  className={
-                    'text-[11.5px] font-medium ' +
-                    (active ? 'text-primary-foreground' : 'text-foreground')
-                  }
-                  numberOfLines={1}
-                >
-                  {s.name}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </ScrollView>
-    </View>
-  );
-}
+import { DEMO_LAST_MAP_DOWNLOAD } from '@/lib/shelters';
+import { useSafeRouteStore } from '@/lib/saferouteStore';
+import { USER_PLACE_TYPE_META, type UserPlace } from '@/src/types/userPlaces';
 
 export function OfflinePlanModal({
   visible,
@@ -140,37 +38,26 @@ export function OfflinePlanModal({
   onClose: () => void;
 }) {
   const {
-    fallbacks,
     familyMeetingPoint,
     emergencyNotes,
-    userLocation,
     userPlaces,
-    saveFallback,
-    clearFallback,
     setFamilyMeetingPoint,
     setEmergencyNotes,
     openAddPlace,
+    removeUserPlace,
+    routeFromSavedPlaceToNearestShelter,
+    routeFromCurrentLocationToSavedPlace,
   } = useSafeRouteStore();
 
-  const [query, setQuery] = useState('');
+  const handleRouteToShelter = async (place: UserPlace) => {
+    onClose();
+    await routeFromSavedPlaceToNearestShelter(place);
+  };
 
-  // Show the 20 nearest shelters to the user's location, optionally filtered
-  // by a free-text search.
-  const candidates = useMemo<Shelter[]>(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = q
-      ? SHELTERS.filter(
-          (s) =>
-            s.name.toLowerCase().includes(q) ||
-            s.address.toLowerCase().includes(q),
-        )
-      : SHELTERS;
-    return [...filtered]
-      .map((s) => ({ s, d: haversineMeters(userLocation, s) }))
-      .toSorted((a, b) => a.d - b.d)
-      .slice(0, 20)
-      .map((x) => x.s);
-  }, [query, userLocation]);
+  const handleRouteFromHere = async (place: UserPlace) => {
+    onClose();
+    await routeFromCurrentLocationToSavedPlace(place);
+  };
 
   return (
     <Modal
@@ -224,32 +111,7 @@ export function OfflinePlanModal({
                 </Text>
               </View>
 
-              <Text className="text-muted-foreground text-[11px] uppercase tracking-wider mb-2">
-                Search shelters
-              </Text>
-              <TextInput
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Filter by name or address…"
-                placeholderTextColor="hsl(215 15% 55%)"
-                className="rounded-xl border border-border bg-secondary/40 px-3 py-2.5 text-foreground text-[13px] mb-3"
-              />
-
-              <Text className="text-muted-foreground text-[11px] uppercase tracking-wider mb-2">
-                Saved shelters
-              </Text>
-              {SLOTS.map((meta) => (
-                <SlotRow
-                  key={meta.slot}
-                  meta={meta}
-                  saved={fallbacks[meta.slot]}
-                  candidates={candidates}
-                  onPick={(s) => saveFallback(meta.slot, s)}
-                  onClear={() => clearFallback(meta.slot)}
-                />
-              ))}
-
-              <View className="flex-row items-center justify-between mt-3 mb-2">
+              <View className="flex-row items-center justify-between mb-2">
                 <Text className="text-muted-foreground text-[11px] uppercase tracking-wider">
                   Saved places (private)
                 </Text>
@@ -271,9 +133,12 @@ export function OfflinePlanModal({
 
               {userPlaces.length === 0 ? (
                 <View className="rounded-xl bg-secondary/40 border border-border px-3 py-3 mb-2">
+                  <Text className="text-foreground text-[12.5px] font-semibold mb-1">
+                    No saved places yet
+                  </Text>
                   <Text className="text-muted-foreground text-[11.5px]">
-                    Add home, work, or school while online to make offline
-                    planning easier.
+                    Add the places that matter to you — home, a relative, a workplace,
+                    or anywhere else. Saved while online, they stay available offline.
                   </Text>
                 </View>
               ) : (
@@ -282,29 +147,67 @@ export function OfflinePlanModal({
                   return (
                     <View
                       key={p.id}
-                      className="rounded-xl border border-border bg-secondary/40 px-3 py-2.5 mb-2 flex-row items-center gap-2"
+                      className="rounded-xl border border-border bg-secondary/40 px-3 py-3 mb-2"
                     >
-                      <View
-                        className="h-7 w-7 items-center justify-center rounded-full"
-                        style={{
-                          backgroundColor: meta.color + '33',
-                          borderWidth: 1,
-                          borderColor: meta.color,
-                        }}
-                      >
-                        <Bookmark color={meta.color} size={14} />
+                      <View className="flex-row items-center gap-2 mb-2">
+                        <View
+                          className="h-8 w-8 items-center justify-center rounded-full"
+                          style={{
+                            backgroundColor: meta.color + '33',
+                            borderWidth: 1,
+                            borderColor: meta.color,
+                          }}
+                        >
+                          <Bookmark color={meta.color} size={15} />
+                        </View>
+                        <View className="flex-1">
+                          <Text
+                            className="text-foreground text-[13px] font-semibold"
+                            numberOfLines={1}
+                          >
+                            {p.label}
+                          </Text>
+                          <Text
+                            className="text-muted-foreground text-[11px]"
+                            numberOfLines={1}
+                          >
+                            {p.address}
+                          </Text>
+                        </View>
+                        <Pressable
+                          onPress={() => removeUserPlace(p.id)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Delete ${p.label}`}
+                          hitSlop={8}
+                          className="h-8 w-8 items-center justify-center rounded-full bg-card border border-border"
+                        >
+                          <Trash2 color="#ef4444" size={14} />
+                        </Pressable>
                       </View>
-                      <View className="flex-1">
-                        <Text className="text-foreground text-[12.5px] font-semibold" numberOfLines={1}>
-                          {p.label}
-                        </Text>
-                        <Text className="text-muted-foreground text-[11px]" numberOfLines={1}>
-                          {p.address}
-                        </Text>
+                      <View className="flex-row gap-2">
+                        <Pressable
+                          onPress={() => handleRouteToShelter(p)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Route from ${p.label} to nearest shelter`}
+                          className="flex-1 flex-row items-center justify-center gap-1.5 rounded-full bg-primary px-3 min-h-[36px]"
+                        >
+                          <Shield color="#ffffff" size={13} />
+                          <Text className="text-primary-foreground text-[11.5px] font-semibold">
+                            Nearest shelter
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => handleRouteFromHere(p)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Route from current location to ${p.label}`}
+                          className="flex-1 flex-row items-center justify-center gap-1.5 rounded-full bg-card border border-border px-3 min-h-[36px]"
+                        >
+                          <Navigation className="text-foreground" size={13} />
+                          <Text className="text-foreground text-[11.5px] font-semibold">
+                            Route here
+                          </Text>
+                        </Pressable>
                       </View>
-                      <Text className="text-muted-foreground/80 text-[10px]">
-                        {meta.label}
-                      </Text>
                     </View>
                   );
                 })
@@ -337,10 +240,13 @@ export function OfflinePlanModal({
                 textAlignVertical="top"
               />
 
-              <Text className="text-[10.5px] text-muted-foreground mt-3 italic">
-                Shelter records are a hardcoded Päästeamet open-data snapshot.
-                Everything in this panel is stored on this device only. No backend.
-              </Text>
+              <View className="flex-row items-center gap-1.5 mt-3">
+                <MapPin color="hsl(215 15% 55%)" size={11} />
+                <Text className="text-[10.5px] text-muted-foreground italic flex-1">
+                  Shelter records are a hardcoded Päästeamet open-data snapshot.
+                  Everything in this panel is stored on this device only. No backend.
+                </Text>
+              </View>
             </ScrollView>
           </View>
         </SafeAreaView>
