@@ -46,3 +46,21 @@ export const USER_PLACE_TYPE_META: Record<
   }, // pink
   other: { label: 'Other', color: '#e5e7eb', defaultLabel: 'Saved place' }, // light gray
 };
+
+/**
+ * Safe getter — returns the `other` entry as a fallback if a persisted place
+ * has an unknown or undefined `type` value (defensive against legacy /
+ * corrupted AsyncStorage payloads). Never returns undefined.
+ */
+export function getUserPlaceMeta(
+  type: string | undefined | null,
+): { label: string; color: string; defaultLabel: string } {
+  if (
+    typeof type === 'string' &&
+    Object.prototype.hasOwnProperty.call(USER_PLACE_TYPE_META, type)
+  ) {
+    const entry = (USER_PLACE_TYPE_META as Record<string, { label: string; color: string; defaultLabel: string }>)[type];
+    if (entry) return entry;
+  }
+  return USER_PLACE_TYPE_META.other;
+}

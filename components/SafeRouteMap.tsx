@@ -25,7 +25,7 @@ import MapView, {
 
 import { SHELTER_COLORS } from '@/lib/constants';
 import { DEMO_DANGER_ZONE, type Shelter } from '@/lib/shelters';
-import { USER_PLACE_TYPE_META, type UserPlace } from '@/src/types/userPlaces';
+import { getUserPlaceMeta, type UserPlace } from '@/src/types/userPlaces';
 
 import type { SafeRouteMapProps } from './SafeRouteMap.types';
 
@@ -112,7 +112,7 @@ export default function SafeRouteMap({
         ref={mapRef}
         style={{ flex: 1 }}
         initialRegion={initialRegion}
-        mapType="standard"
+        mapType={Platform.OS === 'android' ? 'none' : 'standard'}
         showsUserLocation={false}
         showsCompass={false}
         showsPointsOfInterest={false}
@@ -206,9 +206,17 @@ export default function SafeRouteMap({
           : null}
 
         {layerVisibility.savedPlaces
-          ? userPlaces.map((p: UserPlace) => {
+          ? userPlaces
+              .filter(
+                (p): p is UserPlace =>
+                  typeof p?.lat === 'number' &&
+                  typeof p?.lng === 'number' &&
+                  Number.isFinite(p.lat) &&
+                  Number.isFinite(p.lng),
+              )
+              .map((p) => {
               const selected = p.id === selectedUserPlaceId;
-              const color = USER_PLACE_TYPE_META[p.type].color;
+              const color = getUserPlaceMeta(p.type).color;
               return (
                 <Marker
                   key={`up:${p.id}`}

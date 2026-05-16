@@ -26,6 +26,7 @@ import { Text } from '@/components/ui/text';
 import { useSafeRouteStore } from '@/lib/saferouteStore';
 import {
   USER_PLACE_TYPE_META,
+  getUserPlaceMeta,
   type UserPlace,
   type UserPlaceType,
 } from '@/src/types/userPlaces';
@@ -162,7 +163,8 @@ function SavedPlaceCard({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const meta = USER_PLACE_TYPE_META[place.type];
+  const meta = getUserPlaceMeta(place.type);
+  const icon = TYPE_ICON[place.type] ?? TYPE_ICON.other;
   return (
     <View className="rounded-2xl border border-border bg-secondary/40 px-3 py-3 mb-2">
       <View className="flex-row items-center gap-2 mb-2">
@@ -170,7 +172,7 @@ function SavedPlaceCard({
           className="h-8 w-8 items-center justify-center rounded-full"
           style={{ backgroundColor: meta.color + '33', borderWidth: 1, borderColor: meta.color }}
         >
-          {TYPE_ICON[place.type]}
+          {icon}
         </View>
         <View className="flex-1">
           <Text className="text-foreground text-[13.5px] font-semibold" numberOfLines={1}>
@@ -257,7 +259,8 @@ export function SavedPlaceBottomSheet({
     routeFromCurrentLocationToSavedPlace,
   } = useSafeRouteStore();
   if (!place) return null;
-  const meta = USER_PLACE_TYPE_META[place.type];
+  const meta = getUserPlaceMeta(place.type);
+  const icon = TYPE_ICON[place.type] ?? TYPE_ICON.other;
 
   return (
     <View
@@ -275,7 +278,7 @@ export function SavedPlaceBottomSheet({
                 borderColor: meta.color,
               }}
             >
-              {TYPE_ICON[place.type]}
+              {icon}
             </View>
             <View className="flex-1">
               <View className="flex-row items-center gap-1.5">

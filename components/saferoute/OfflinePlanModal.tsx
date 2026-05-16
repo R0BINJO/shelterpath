@@ -28,7 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text } from '@/components/ui/text';
 import { DEMO_LAST_MAP_DOWNLOAD } from '@/lib/shelters';
 import { useSafeRouteStore } from '@/lib/saferouteStore';
-import { USER_PLACE_TYPE_META, type UserPlace } from '@/src/types/userPlaces';
+import { getUserPlaceMeta, type UserPlace } from '@/src/types/userPlaces';
 
 export function OfflinePlanModal({
   visible,
@@ -143,7 +143,7 @@ export function OfflinePlanModal({
                 </View>
               ) : (
                 userPlaces.map((p) => {
-                  const meta = USER_PLACE_TYPE_META[p.type];
+                  const meta = getUserPlaceMeta(p.type);
                   return (
                     <View
                       key={p.id}
