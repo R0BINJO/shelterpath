@@ -9,9 +9,9 @@
  * Drag handle is functional via PanGesture.
  *
  * Route source labels:
- *   - "Direct walking route"         (great-circle line, no road snapping)
- *   - "Offline demo graph route"     (legacy local Dijkstra)
- *   - "Fallback distance estimate"   (haversine straight-line)
+ *   - "Walking · streets" / "Walking · roads"  (real OSM-snapped routes)
+ *   - "Offline demo graph route"               (legacy local Dijkstra)
+ *   - "Fallback estimate"                      (haversine straight-line)
  */
 
 import { useEffect } from 'react';
@@ -88,7 +88,12 @@ function Stat({
 
 function RouteSourceChip({ source, label }: { source: RouteSource; label: string }) {
   const colors: Record<RouteSource, { bg: string; border: string; dot: string }> = {
-    'direct-walk': {
+    'osrm-foot': {
+      bg: 'bg-emerald-500/15',
+      border: 'border-emerald-500/40',
+      dot: 'bg-emerald-400',
+    },
+    'osrm-walking': {
       bg: 'bg-emerald-500/15',
       border: 'border-emerald-500/40',
       dot: 'bg-emerald-400',
@@ -106,7 +111,11 @@ function RouteSourceChip({ source, label }: { source: RouteSource; label: string
   };
   const c = colors[source];
   const Icon =
-    source === 'direct-walk' ? Radio : source === 'offline-graph' ? WifiOff : ActivityIcon;
+    source === 'osrm-foot' || source === 'osrm-walking'
+      ? Radio
+      : source === 'offline-graph'
+        ? WifiOff
+        : ActivityIcon;
   return (
     <View className={cn('flex-row items-center gap-1.5 rounded-full border px-2.5 py-1', c.bg, c.border)}>
       <View className={cn('h-1.5 w-1.5 rounded-full', c.dot)} />
@@ -445,8 +454,10 @@ export function ShelterSheet({
 
 function routeLabel(source: RouteSource): string {
   switch (source) {
-    case 'direct-walk':
-      return 'Direct walking';
+    case 'osrm-foot':
+      return 'Walking · streets';
+    case 'osrm-walking':
+      return 'Walking · roads';
     case 'offline-graph':
       return 'Offline graph';
     case 'fallback-line':

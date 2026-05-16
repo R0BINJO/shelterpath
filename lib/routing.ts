@@ -1,33 +1,34 @@
 /*
  * SafeRoute Varjumine — routing service.
  *
- * DIRECT WALKING ROUTING (crow-flies / off-road).
+ * STREET-FOLLOWING WALKING ROUTING.
  * ------------------------------------------------
- * In a crisis you do NOT want a car-style route that drags you a kilometre
- * around the block to obey one-way streets. People on foot cut across parks,
- * courtyards, pedestrian zones, and squares. So this build computes the
- * route as a great-circle straight line from the user to the shelter,
- * sampled into intermediate points so the polyline curves correctly on the
- * map at any zoom level.
+ * Routes are computed against a real walking street network so the polyline
+ * follows roads, footways, paths, and pedestrian zones — it does NOT cut
+ * across buildings, private land, or water.
  *
- * Key properties:
- *   - No street-network constraint. The path goes in ANY direction, over
- *     streets, across parks, through pedestrian zones.
- *   - Distance = haversine (great-circle) metres between endpoints.
- *   - Walking time = distance / 1.35 m/s (calm walking pace).
- *   - Steps = compass-bearing directions ("Walk northeast ~320 m") plus a
- *     final arrive line. No road names — there's no road network involved.
- *   - No network calls. Fully offline. Identical on every device.
+ * Tiered strategy:
+ *   1. OSRM public demo server, foot profile
+ *        https://routing.openstreetmap.de/routed-foot/route/v1/foot/...
+ *      Returns a real OSM-pedestrian-network polyline with turn-by-turn steps.
+ *      Backed by global OpenStreetMap data, identical coverage for Estonia.
+ *   2. OSRM walking profile on router.project-osrm.org (fallback if the
+ *      first endpoint is rate-limited or down). This profile is not strictly
+ *      pedestrian but allows walking on most roads — still snapped to the
+ *      street network so it won't cross buildings.
+ *   3. Offline straight-line haversine as a last resort when both endpoints
+ *      are unreachable. Flagged in the UI as a fallback estimate, NOT a
+ *      true walking route.
+ *
+ * Walking pace is 1.35 m/s (calm pace) when we compute time from distance
+ * ourselves; if OSRM returns a duration we use it directly.
  *
  * NEAREST-SHELTER STRATEGY:
- *   With 200+ shelters in the Päästeamet snapshot we still pre-filter by
- *   haversine top-N. Because the route is itself the haversine line, the
- *   nearest by straight-line IS the nearest by route — no second pass
- *   needed, no network round-trip.
- *
- * The legacy offline-graph Dijkstra path is kept exported for backwards
- * compatibility but is never invoked by default — `getRouteToShelter` now
- * always returns a direct walking route.
+ *   With 200+ shelters in the Päästeamet snapshot we pre-filter by
+ *   haversine top-N candidates, run pedestrian routes for those in
+ *   parallel with a short timeout each, then pick the shortest actual
+ *   walking distance. If every routing call fails, the best haversine
+ *   candidate wins and the result is labelled as a fallback estimate.
  */
 
 import {
@@ -44,7 +45,11 @@ import {
   pathToGeoJsonCoords,
 } from './walkingGraph';
 
-export type RouteSource = 'direct-walk' | 'offline-graph' | 'fallback-line';
+export type RouteSource =
+  | 'osrm-foot'
+  | 'osrm-walking'
+  | 'offline-graph'
+  | 'fallback-line';
 
 export type RouteResult = {
   shelterId: string;
@@ -58,143 +63,191 @@ export type RouteResult = {
 
 export type LatLng = { lat: number; lng: number };
 
-// Sample the great-circle line every ~25 metres so the rendered polyline
-// curves smoothly at every zoom level without being chunky at city scale.
-const SAMPLE_INTERVAL_METERS = 25;
-const MIN_SAMPLES = 2;
-const MAX_SAMPLES = 64;
+// PROTOTYPE ROUTING ENDPOINTS — public demo servers. Replace with your own
+// OSRM / Valhalla / GraphHopper instance for production.
+const OSRM_FOOT_ENDPOINT = 'https://routing.openstreetmap.de/routed-foot/route/v1/foot';
+const OSRM_WALKING_ENDPOINT = 'https://router.project-osrm.org/route/v1/walking';
 
-function toRad(d: number): number {
-  return (d * Math.PI) / 180;
-}
-function toDeg(r: number): number {
-  return (r * 180) / Math.PI;
-}
+const ROUTE_TIMEOUT_MS = 4500;
+const NEAREST_CANDIDATE_COUNT = 8;
 
-function walkingMinutes(meters: number): number {
+function walkingMinutes(meters: number, secondsFromService?: number): number {
+  if (typeof secondsFromService === 'number' && Number.isFinite(secondsFromService) && secondsFromService > 0) {
+    return Math.max(1, Math.round(secondsFromService / 60));
+  }
   // 1.35 m/s ≈ 4.86 km/h calm walking pace.
   return Math.max(1, Math.round(meters / 1.35 / 60));
 }
 
-/**
- * Compass bearing in degrees from `a` to `b` (0 = north, 90 = east).
- */
-function bearingDegrees(a: LatLng, b: LatLng): number {
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const y = Math.sin(dLng) * Math.cos(lat2);
-  const x =
-    Math.cos(lat1) * Math.sin(lat2) -
-    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-  const bearing = (toDeg(Math.atan2(y, x)) + 360) % 360;
-  return bearing;
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('Routing timeout')), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
 }
 
-function bearingToCompass(bearing: number): string {
-  const dirs = [
-    'north',
-    'northeast',
-    'east',
-    'southeast',
-    'south',
-    'southwest',
-    'west',
-    'northwest',
-  ];
-  const idx = Math.round(bearing / 45) % 8;
-  return dirs[idx];
+type OsrmStep = {
+  maneuver?: { instruction?: string; type?: string; modifier?: string };
+  name?: string;
+  distance?: number;
+};
+
+type OsrmLeg = {
+  steps?: OsrmStep[];
+};
+
+type OsrmRoute = {
+  distance?: number;
+  duration?: number;
+  geometry?: { coordinates?: [number, number][] };
+  legs?: OsrmLeg[];
+};
+
+type OsrmResponse = {
+  code?: string;
+  routes?: OsrmRoute[];
+};
+
+function describeStep(step: OsrmStep): string | null {
+  const m = step.maneuver;
+  if (!m) return null;
+  const verb = (() => {
+    switch (m.type) {
+      case 'depart':
+        return 'Start walking';
+      case 'arrive':
+        return 'Arrive at destination';
+      case 'turn':
+      case 'continue':
+      case 'new name':
+      case 'merge':
+      case 'fork':
+      case 'end of road':
+        return m.modifier
+          ? `Take ${m.modifier}`
+          : 'Continue';
+      case 'roundabout':
+      case 'rotary':
+      case 'roundabout turn':
+        return 'Take the roundabout';
+      default:
+        return m.modifier ? `Head ${m.modifier}` : 'Continue';
+    }
+  })();
+  const name = step.name && step.name.trim().length > 0 ? ` onto ${step.name}` : '';
+  const dist =
+    typeof step.distance === 'number' && step.distance >= 1
+      ? ` (${step.distance >= 1000 ? `${(step.distance / 1000).toFixed(1)} km` : `${Math.round(step.distance)} m`})`
+      : '';
+  return `${verb}${name}${dist}`.trim();
 }
 
-/**
- * Interpolate a point on the great-circle line from `a` to `b` at fraction
- * `f` ∈ [0, 1]. Standard slerp on the unit sphere.
- */
-function interpolateGreatCircle(a: LatLng, b: LatLng, f: number): [number, number] {
-  // f=0 → a, f=1 → b
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-  const lng1 = toRad(a.lng);
-  const lng2 = toRad(b.lng);
-
-  // Angular distance.
-  const sinHalfDLat = Math.sin((lat2 - lat1) / 2);
-  const sinHalfDLng = Math.sin((lng2 - lng1) / 2);
-  const aHav =
-    sinHalfDLat * sinHalfDLat +
-    Math.cos(lat1) * Math.cos(lat2) * sinHalfDLng * sinHalfDLng;
-  const delta = 2 * Math.atan2(Math.sqrt(aHav), Math.sqrt(1 - aHav));
-
-  if (delta < 1e-9) return [a.lng, a.lat];
-
-  const A = Math.sin((1 - f) * delta) / Math.sin(delta);
-  const B = Math.sin(f * delta) / Math.sin(delta);
-
-  const x = A * Math.cos(lat1) * Math.cos(lng1) + B * Math.cos(lat2) * Math.cos(lng2);
-  const y = A * Math.cos(lat1) * Math.sin(lng1) + B * Math.cos(lat2) * Math.sin(lng2);
-  const z = A * Math.sin(lat1) + B * Math.sin(lat2);
-
-  const lat = Math.atan2(z, Math.sqrt(x * x + y * y));
-  const lng = Math.atan2(y, x);
-  return [toDeg(lng), toDeg(lat)];
-}
-
-function sampleDirectPath(start: LatLng, end: LatLng, distanceMeters: number): [number, number][] {
-  const samples = Math.max(
-    MIN_SAMPLES,
-    Math.min(MAX_SAMPLES, Math.ceil(distanceMeters / SAMPLE_INTERVAL_METERS) + 1),
-  );
-  const coords: [number, number][] = [];
-  for (let i = 0; i < samples; i++) {
-    const f = i / (samples - 1);
-    coords.push(interpolateGreatCircle(start, end, f));
+function stepsFromOsrm(route: OsrmRoute): string[] | undefined {
+  const legs = route.legs ?? [];
+  const out: string[] = [];
+  for (const leg of legs) {
+    for (const step of leg.steps ?? []) {
+      const line = describeStep(step);
+      if (line) out.push(line);
+    }
   }
-  // Force exact endpoints to avoid tiny floating-point drift.
-  coords[0] = [start.lng, start.lat];
-  coords[coords.length - 1] = [end.lng, end.lat];
-  return coords;
+  return out.length > 0 ? out : undefined;
 }
 
-function directWalkSteps(start: LatLng, end: LatLng, distanceMeters: number): string[] {
-  const bearing = bearingDegrees(start, end);
-  const compass = bearingToCompass(bearing);
-  const distLabel =
-    distanceMeters >= 1000
-      ? `${(distanceMeters / 1000).toFixed(1)} km`
-      : `${Math.round(distanceMeters)} m`;
-  return [
-    `Start walking ${compass} (bearing ${Math.round(bearing)}°)`,
-    `Head in a direct line — cut across streets, parks, and squares as needed`,
-    `Continue ${compass} for about ${distLabel}`,
-    `Arrive at the shelter`,
-  ];
+async function fetchOsrm(
+  endpoint: string,
+  start: LatLng,
+  end: LatLng,
+): Promise<OsrmRoute | null> {
+  const url =
+    `${endpoint}/${start.lng.toFixed(6)},${start.lat.toFixed(6)};` +
+    `${end.lng.toFixed(6)},${end.lat.toFixed(6)}` +
+    `?overview=full&geometries=geojson&steps=true&alternatives=false&annotations=false`;
+  try {
+    const res = await withTimeout(fetch(url, { method: 'GET' }), ROUTE_TIMEOUT_MS);
+    if (!res.ok) return null;
+    const json = (await res.json()) as OsrmResponse;
+    if (json.code !== 'Ok') return null;
+    const route = json.routes?.[0];
+    if (!route || !route.geometry?.coordinates || route.geometry.coordinates.length < 2) {
+      return null;
+    }
+    return route;
+  } catch {
+    return null;
+  }
 }
 
-/**
- * Direct walking route from `start` to `shelter`. No road snapping, no
- * network call. The polyline is the great-circle line between the two
- * points sampled into ~25 m segments.
- */
-export function getDirectWalkRoute(start: LatLng, shelter: Shelter): RouteResult {
-  const end: LatLng = { lat: shelter.lat, lng: shelter.lng };
-  const distance = Math.round(haversineMeters(start, end));
-  const coords = sampleDirectPath(start, end, distance);
+function osrmRouteToResult(
+  shelterId: string,
+  route: OsrmRoute,
+  source: 'osrm-foot' | 'osrm-walking',
+): RouteResult {
+  const coords = (route.geometry?.coordinates ?? []) as [number, number][];
+  const distance = Math.round(route.distance ?? 0);
+  const sourceLabel =
+    source === 'osrm-foot'
+      ? 'Walking route on streets and paths'
+      : 'Walking route (general roads)';
   return {
-    shelterId: shelter.id,
+    shelterId,
+    distanceMeters: distance,
+    walkingTimeMinutes: walkingMinutes(distance, route.duration),
+    coordinates: coords,
+    source,
+    sourceLabel,
+    steps: stepsFromOsrm(route),
+  };
+}
+
+function fallbackLineResult(shelterId: string, start: LatLng, end: LatLng): RouteResult {
+  const distance = Math.round(haversineMeters(start, end));
+  return {
+    shelterId,
     distanceMeters: distance,
     walkingTimeMinutes: walkingMinutes(distance),
-    coordinates: coords,
-    source: 'direct-walk',
-    sourceLabel: 'Direct walking route · go any direction, over streets',
-    steps: directWalkSteps(start, end, distance),
+    coordinates: [
+      [start.lng, start.lat],
+      [end.lng, end.lat],
+    ],
+    source: 'fallback-line',
+    sourceLabel: 'Offline fallback (straight-line estimate, not a real walking route)',
   };
 }
 
 /**
+ * Compute a street-snapped walking route from `start` to `shelter`.
+ * Tries OSRM foot profile, then OSRM walking profile, then a straight-line
+ * fallback if the network is unreachable.
+ */
+export async function getRouteToShelter(
+  start: LatLng,
+  shelter: Shelter,
+  _options?: { allowLive?: boolean },
+): Promise<RouteResult> {
+  const end: LatLng = { lat: shelter.lat, lng: shelter.lng };
+
+  const foot = await fetchOsrm(OSRM_FOOT_ENDPOINT, start, end);
+  if (foot) return osrmRouteToResult(shelter.id, foot, 'osrm-foot');
+
+  const walking = await fetchOsrm(OSRM_WALKING_ENDPOINT, start, end);
+  if (walking) return osrmRouteToResult(shelter.id, walking, 'osrm-walking');
+
+  return fallbackLineResult(shelter.id, start, end);
+}
+
+/**
  * Legacy offline-graph route (Dijkstra over the hardcoded lattice). Kept
- * exported for backwards compatibility but no longer invoked by default.
- * Returns null for official-dataset shelters, which is fine — the direct
- * walking route covers them.
+ * exported for backwards compatibility; not used by the default flow.
  */
 export function fallbackLocalGraphRoute(start: LatLng, shelter: Shelter): RouteResult | null {
   const endId = anchorForShelter(shelter);
@@ -226,49 +279,49 @@ export function fallbackLocalGraphRoute(start: LatLng, shelter: Shelter): RouteR
   };
 }
 
-/**
- * Main entry point.
- *
- * The `options.allowLive` flag is accepted for backwards compatibility with
- * existing call sites in the store but has no effect — there is no remote
- * routing tier any more. Every result is a deterministic direct walking
- * route.
- */
-export async function getRouteToShelter(
-  start: LatLng,
-  shelter: Shelter,
-  _options?: { allowLive?: boolean },
-): Promise<RouteResult> {
-  return getDirectWalkRoute(start, shelter);
-}
-
-/** Fetch routes to all of a (small!) set of shelters. */
+/** Fetch routes to a (small!) set of shelters in parallel. */
 export async function getRoutesToAllShelters(
   start: LatLng,
   shelters: readonly Shelter[] = SHELTERS,
   _options?: { allowLive?: boolean },
 ): Promise<RouteResult[]> {
-  return shelters.map((s) => getDirectWalkRoute(start, s));
+  return Promise.all(shelters.map((s) => getRouteToShelter(start, s)));
 }
 
 /**
  * Find the nearest shelter by walking distance.
  *
- * Because the route IS the great-circle line between the two points, the
- * straight-line nearest shelter is also the nearest by route. No second
- * pass needed.
+ * Pre-filter by haversine top-N, run OSRM foot routes for each candidate in
+ * parallel, pick the shortest actual walking distance. If every OSRM call
+ * fails for every candidate, fall back to the best haversine candidate and
+ * label the result as a fallback estimate.
  */
 export async function findNearestByRouteDistance(
   start: LatLng,
   shelters: readonly Shelter[] = SHELTERS,
-  _options?: { allowLive?: boolean; candidateCount?: number },
+  options?: { allowLive?: boolean; candidateCount?: number },
 ): Promise<{ shelter: Shelter; route: RouteResult }> {
   if (shelters.length === 0) {
     throw new Error('No shelters available.');
   }
-  const [winner] = nearestByStraightLine(start, shelters, 1);
-  const route = getDirectWalkRoute(start, winner);
-  return { shelter: winner, route };
+  const candidateCount = Math.max(1, options?.candidateCount ?? NEAREST_CANDIDATE_COUNT);
+  const candidates = nearestByStraightLine(start, shelters, candidateCount);
+
+  const routed = await Promise.all(
+    candidates.map(async (shelter) => {
+      const route = await getRouteToShelter(start, shelter);
+      return { shelter, route };
+    }),
+  );
+
+  // Prefer real OSRM routes over fallback lines.
+  const real = routed.filter(
+    (r) => r.route.source === 'osrm-foot' || r.route.source === 'osrm-walking',
+  );
+  const pool = real.length > 0 ? real : routed;
+  pool.sort((a, b) => a.route.distanceMeters - b.route.distanceMeters);
+  const winner = pool[0];
+  return { shelter: winner.shelter, route: winner.route };
 }
 
 /** Legacy adapter — kept for any external consumer. */
