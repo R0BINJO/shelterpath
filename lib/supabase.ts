@@ -26,7 +26,9 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+export const supabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+
+if (!supabaseConfigured) {
   // The auth UI surfaces a friendlier message; this is for the developer log.
   // eslint-disable-next-line no-console
   console.warn(
@@ -35,14 +37,23 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   );
 }
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    storage: AsyncStorage,
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
+// `createClient` throws synchronously when either argument is empty, which
+// crashes the whole app at import time. Fall back to harmless placeholder
+// strings so the rest of the app can boot; every real network call will still
+// fail (and the auth UI shows a configuration banner) until the env vars are
+// provided.
+export const supabase = createClient(
+  SUPABASE_URL || 'https://placeholder.supabase.co',
+  SUPABASE_ANON_KEY || 'placeholder-anon-key',
+  {
+    auth: {
+      storage: AsyncStorage,
+      autoRefreshToken: supabaseConfigured,
+      persistSession: supabaseConfigured,
+      detectSessionInUrl: false,
+    },
   },
-});
+);
 
 export type CommunityShelterRow = {
   id: string;
