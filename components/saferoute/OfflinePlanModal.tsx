@@ -2,23 +2,33 @@
  * SafeRoute Varjumine — Offline Plan modal.
  *
  * Lets the user pin saved fallback shelters (home / work / school / generic),
- * a family meeting point and emergency notes. All values persist to AsyncStorage
- * via lib/saferouteStore.ts (the React Native equivalent of localStorage).
+ * a family meeting point and emergency notes. All values persist to
+ * AsyncStorage via lib/saferouteStore.ts (the RN equivalent of localStorage).
+ *
+ * Saved fallback shelters store id, name, address, lat, lng, snapshot date and
+ * a saved-at timestamp so the offline view still works when the dataset is
+ * not loaded.
  *
  * "Last downloaded map" is a HARDCODED demo timestamp — no real tiles are stored.
  */
 
 import { Briefcase, Bookmark, GraduationCap, Home, Users, X } from 'lucide-react-native';
+import { useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
 import {
   DEMO_LAST_MAP_DOWNLOAD,
+  haversineMeters,
   SHELTERS,
   type Shelter,
 } from '@/lib/shelters';
-import { type FallbackSlot, type SavedFallback, useSafeRouteStore } from '@/lib/saferouteStore';
+import {
+  type FallbackSlot,
+  type SavedFallback,
+  useSafeRouteStore,
+} from '@/lib/saferouteStore';
 
 type SlotMeta = {
   slot: FallbackSlot;
@@ -44,12 +54,14 @@ const SLOTS: SlotMeta[] = [
 function SlotRow({
   meta,
   saved,
-  onChange,
+  candidates,
+  onPick,
   onClear,
 }: {
   meta: SlotMeta;
   saved: SavedFallback | undefined;
-  onChange: (shelterId: number) => void;
+  candidates: Shelter[];
+  onPick: (shelter: Shelter) => void;
   onClear: () => void;
 }) {
   return (
@@ -71,27 +83,34 @@ function SlotRow({
         ) : null}
       </View>
       {saved ? (
-        <Text className="text-foreground text-[12.5px] mb-2">
-          {saved.shelterName}
-        </Text>
+        <View className="mb-2">
+          <Text className="text-foreground text-[12.5px]" numberOfLines={1}>
+            {saved.shelterName}
+          </Text>
+          <Text className="text-muted-foreground text-[11px] mt-0.5" numberOfLines={1}>
+            {saved.shelterAddress}
+          </Text>
+          <Text className="text-muted-foreground text-[10px] mt-0.5">
+            Saved {new Date(saved.savedAt).toLocaleDateString()} · snapshot{' '}
+            {saved.dataSnapshotDate}
+          </Text>
+        </View>
       ) : (
         <Text className="text-muted-foreground text-[12px] mb-2">Not set</Text>
       )}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View className="flex-row gap-2">
-          {SHELTERS.map((s) => {
+          {candidates.map((s) => {
             const active = saved?.shelterId === s.id;
             return (
               <Pressable
                 key={s.id}
-                onPress={() => onChange(s.id)}
+                onPress={() => onPick(s)}
                 accessibilityRole="button"
                 accessibilityLabel={`Pick ${s.name}`}
                 className={
                   'rounded-full border px-3 py-1.5 ' +
-                  (active
-                    ? 'bg-primary border-primary'
-                    : 'bg-card border-border')
+                  (active ? 'bg-primary border-primary' : 'bg-card border-border')
                 }
               >
                 <Text
@@ -99,8 +118,9 @@ function SlotRow({
                     'text-[11.5px] font-medium ' +
                     (active ? 'text-primary-foreground' : 'text-foreground')
                   }
+                  numberOfLines={1}
                 >
-                  {s.type} · {s.name}
+                  {s.name}
                 </Text>
               </Pressable>
             );
@@ -122,13 +142,32 @@ export function OfflinePlanModal({
     fallbacks,
     familyMeetingPoint,
     emergencyNotes,
+    userLocation,
     saveFallback,
     clearFallback,
     setFamilyMeetingPoint,
     setEmergencyNotes,
   } = useSafeRouteStore();
 
-  const sheltersById = new Map<number, Shelter>(SHELTERS.map((s) => [s.id, s]));
+  const [query, setQuery] = useState('');
+
+  // Show the 20 nearest shelters to the user's location, optionally filtered
+  // by a free-text search.
+  const candidates = useMemo<Shelter[]>(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? SHELTERS.filter(
+          (s) =>
+            s.name.toLowerCase().includes(q) ||
+            s.address.toLowerCase().includes(q),
+        )
+      : SHELTERS;
+    return [...filtered]
+      .map((s) => ({ s, d: haversineMeters(userLocation, s) }))
+      .toSorted((a, b) => a.d - b.d)
+      .slice(0, 20)
+      .map((x) => x.s);
+  }, [query, userLocation]);
 
   return (
     <Modal
@@ -139,10 +178,7 @@ export function OfflinePlanModal({
     >
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}>
         <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel="Dismiss" />
-        <SafeAreaView
-          edges={['bottom']}
-          style={{ backgroundColor: 'transparent' }}
-        >
+        <SafeAreaView edges={['bottom']} style={{ backgroundColor: 'transparent' }}>
           <View className="rounded-t-3xl bg-card border-t border-border max-h-[88vh]">
             <View className="items-center pt-2.5 pb-1">
               <View className="h-1.5 w-12 rounded-full bg-muted-foreground/40" />
@@ -179,7 +215,22 @@ export function OfflinePlanModal({
                 <Text className="text-emerald-200/80 text-[11px] mt-0.5">
                   Last map snapshot · {DEMO_LAST_MAP_DOWNLOAD} (demo timestamp)
                 </Text>
+                <Text className="text-emerald-200/80 text-[11px] mt-1">
+                  Live routing requires internet. Offline fallback uses haversine
+                  distance estimates.
+                </Text>
               </View>
+
+              <Text className="text-muted-foreground text-[11px] uppercase tracking-wider mb-2">
+                Search shelters
+              </Text>
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Filter by name or address…"
+                placeholderTextColor="hsl(215 15% 55%)"
+                className="rounded-xl border border-border bg-secondary/40 px-3 py-2.5 text-foreground text-[13px] mb-3"
+              />
 
               <Text className="text-muted-foreground text-[11px] uppercase tracking-wider mb-2">
                 Saved shelters
@@ -189,10 +240,8 @@ export function OfflinePlanModal({
                   key={meta.slot}
                   meta={meta}
                   saved={fallbacks[meta.slot]}
-                  onChange={(id) => {
-                    const s = sheltersById.get(id);
-                    if (s) saveFallback(meta.slot, s);
-                  }}
+                  candidates={candidates}
+                  onPick={(s) => saveFallback(meta.slot, s)}
                   onClear={() => clearFallback(meta.slot)}
                 />
               ))}
@@ -225,6 +274,7 @@ export function OfflinePlanModal({
               />
 
               <Text className="text-[10.5px] text-muted-foreground mt-3 italic">
+                Shelter records are a hardcoded Päästeamet open-data snapshot.
                 Everything in this panel is stored on this device only. No backend.
               </Text>
             </ScrollView>

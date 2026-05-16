@@ -11,8 +11,8 @@ import type { Shelter } from '@/lib/shelters';
 export type SafeRouteMapStyle = 'bright' | 'dark';
 
 export type SafeRouteMapProps = {
-  shelters: Shelter[];
-  selectedShelterId: number | null;
+  shelters: readonly Shelter[];
+  selectedShelterId: string | null;
   route: RouteResult | null;
   userLocation: { lat: number; lng: number };
   isLiveUserLocation: boolean;

@@ -1,21 +1,37 @@
 /*
  * SafeRoute Varjumine — routing service.
  *
- * Three-tier strategy:
+ * Three-tier strategy when computing a route to ONE shelter:
  *   1. Online: OSRM-compatible public demo endpoint (foot profile, OSM data)
- *   2. Offline fallback: hardcoded simplified walking graph + Dijkstra
- *   3. Haversine fallback: straight-line guess (last resort, clearly labelled)
+ *      "Live walking route"
+ *   2. Fallback: haversine straight-line, clearly labelled
+ *      "Fallback distance estimate"
+ *   3. Optional: hardcoded simplified walking graph (kept for the demo nodes
+ *      around Tallinn city centre) — "Offline demo graph route"
+ *
+ * NEAREST-SHELTER STRATEGY:
+ *   The official Päästeamet snapshot contains 200+ shelters across Estonia.
+ *   We never request OSRM routes to all of them. Instead:
+ *     a. compute cheap haversine distance to every candidate,
+ *     b. take the top 10 closest by straight-line distance,
+ *     c. request OSRM walking routes for just those 10,
+ *     d. pick the smallest actual route distance.
+ *   If OSRM fails for every candidate, return the haversine winner with a
+ *   "Fallback distance estimate" label.
  *
  * PROTOTYPE ROUTING ENDPOINT
  *   The OSRM public demo endpoint is rate-limited and routes by car by default;
- *   we request /foot/ but transparently fall back if foot is unsupported.
+ *   we request /foot/ but transparently fall back to /walking/ if foot is
+ *   unsupported.
  *
- * PRODUCTION TODO: self-host OSRM (`osrm-backend`) or GraphHopper with a pedestrian
- *   profile and OpenStreetMap Tallinn extract. Replace OSRM_BASE_URL below.
+ * PRODUCTION TODO: self-host OSRM (`osrm-backend`) or GraphHopper with a
+ * pedestrian profile and OpenStreetMap Estonia extract. Replace OSRM_BASE_URL.
  */
 
 import {
   DEMO_USER_LOCATION,
+  haversineMeters,
+  nearestByStraightLine,
   SHELTERS,
   type RoutePolyline,
   type Shelter,
@@ -27,13 +43,12 @@ import {
 } from './walkingGraph';
 
 // PUBLIC OSRM DEMO ENDPOINT — for prototype only.
-// Production should use a self-hosted OSRM or GraphHopper server.
 export const OSRM_BASE_URL = 'https://router.project-osrm.org';
 
 export type RouteSource = 'live' | 'offline-graph' | 'fallback-line';
 
 export type RouteResult = {
-  shelterId: number;
+  shelterId: string;
   distanceMeters: number;
   walkingTimeMinutes: number;
   coordinates: [number, number][]; // GeoJSON [lng, lat]
@@ -46,6 +61,7 @@ export type LatLng = { lat: number; lng: number };
 
 const FOOT_PROFILES = ['foot', 'walking'] as const;
 const FETCH_TIMEOUT_MS = 4500;
+const NEAREST_CANDIDATE_COUNT = 10;
 
 async function fetchWithTimeout(url: string, ms: number): Promise<Response | null> {
   try {
@@ -59,25 +75,23 @@ async function fetchWithTimeout(url: string, ms: number): Promise<Response | nul
   }
 }
 
+type OsrmStep = {
+  maneuver?: { type?: string; modifier?: string };
+  name?: string;
+  distance?: number;
+};
+
 type OsrmResponse = {
   code: string;
   routes?: {
     geometry: { type: 'LineString'; coordinates: [number, number][] };
-    distance: number; // meters
-    duration: number; // seconds
-    legs?: {
-      steps?: {
-        maneuver?: { type?: string; modifier?: string };
-        name?: string;
-        distance?: number;
-      }[];
-    }[];
+    distance: number;
+    duration: number;
+    legs?: { steps?: OsrmStep[] }[];
   }[];
 };
 
-function simplifyStep(
-  step: NonNullable<NonNullable<OsrmResponse['routes']>[number]['legs']>[number]['steps'] extends (infer S)[] | undefined ? S : never,
-): string {
+function simplifyStep(step: OsrmStep): string {
   const type = step?.maneuver?.type ?? 'continue';
   const modifier = step?.maneuver?.modifier;
   const name = step?.name?.trim();
@@ -98,7 +112,11 @@ function simplifyStep(
   return `${verb}${where}${dist ? ` (${dist})` : ''}`;
 }
 
-async function fetchOsrm(start: LatLng, end: LatLng, profile: string): Promise<OsrmResponse | null> {
+async function fetchOsrm(
+  start: LatLng,
+  end: LatLng,
+  profile: string,
+): Promise<OsrmResponse | null> {
   const url =
     `${OSRM_BASE_URL}/route/v1/${profile}/` +
     `${start.lng},${start.lat};${end.lng},${end.lat}` +
@@ -138,32 +156,37 @@ async function getLiveRoute(start: LatLng, shelter: Shelter): Promise<RouteResul
           : walkingMinutes(route.distance),
       coordinates: coords,
       source: 'live',
-      sourceLabel: `Live route · OSRM ${profile}`,
+      sourceLabel: `Live walking route · OSRM ${profile}`,
       steps,
     };
   }
   return null;
 }
 
-/** Tier 2: offline graph (Dijkstra over the hardcoded lattice). */
+/**
+ * Tier 3 (legacy, optional): offline graph (Dijkstra over the hardcoded
+ * lattice). Only works for the few legacy demo shelter ids that were anchored
+ * to the graph. Returns null for official-snapshot shelters, which is fine —
+ * the haversine fallback covers them.
+ */
 export function fallbackLocalGraphRoute(start: LatLng, shelter: Shelter): RouteResult | null {
-  // The hardcoded graph anchors start at the demo user node "u". For arbitrary
-  // start positions we'd nearest-node them; for this MVP the user node is fixed.
-  const startId = 'u';
   const endId = anchorForShelter(shelter);
-  const result = dijkstra(startId, endId);
+  if (!endId) return null;
+  const result = dijkstra('u', endId);
   if (!result) return null;
   let coords = pathToGeoJsonCoords(result.path);
-  // If the device's real geolocation differs from the demo user node, prepend
-  // a leg from the real start to the first graph node so the route line
-  // actually starts where the user is.
   const first = coords[0];
-  if (first && (Math.abs(first[1] - start.lat) > 1e-5 || Math.abs(first[0] - start.lng) > 1e-5)) {
+  if (
+    first &&
+    (Math.abs(first[1] - start.lat) > 1e-5 || Math.abs(first[0] - start.lng) > 1e-5)
+  ) {
     coords = [[start.lng, start.lat], ...coords];
   }
-  // Same for shelter terminus.
   const last = coords[coords.length - 1];
-  if (last && (Math.abs(last[1] - shelter.lat) > 1e-5 || Math.abs(last[0] - shelter.lng) > 1e-5)) {
+  if (
+    last &&
+    (Math.abs(last[1] - shelter.lat) > 1e-5 || Math.abs(last[0] - shelter.lng) > 1e-5)
+  ) {
     coords = [...coords, [shelter.lng, shelter.lat]];
   }
   return {
@@ -172,25 +195,13 @@ export function fallbackLocalGraphRoute(start: LatLng, shelter: Shelter): RouteR
     walkingTimeMinutes: walkingMinutes(result.distanceMeters),
     coordinates: coords,
     source: 'offline-graph',
-    sourceLabel: 'Offline route · simplified demo walking graph',
+    sourceLabel: 'Offline demo graph route',
   };
 }
 
-/** Tier 3: haversine-only straight line. */
-function toRadDeg(d: number): number {
-  return (d * Math.PI) / 180;
-}
-
+/** Haversine-only straight line. */
 function haversineFallback(start: LatLng, shelter: Shelter): RouteResult {
-  const R = 6371000;
-  const dLat = toRadDeg(shelter.lat - start.lat);
-  const dLng = toRadDeg(shelter.lng - start.lng);
-  const lat1 = toRadDeg(start.lat);
-  const lat2 = toRadDeg(shelter.lat);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  const distance = Math.round(2 * R * Math.asin(Math.min(1, Math.sqrt(h))));
+  const distance = Math.round(haversineMeters(start, shelter));
   return {
     shelterId: shelter.id,
     distanceMeters: distance,
@@ -200,11 +211,11 @@ function haversineFallback(start: LatLng, shelter: Shelter): RouteResult {
       [shelter.lng, shelter.lat],
     ],
     source: 'fallback-line',
-    sourceLabel: 'Demo fallback · straight-line estimate',
+    sourceLabel: 'Fallback distance estimate · straight-line',
   };
 }
 
-/** Main entry point — try tiers in order. */
+/** Main entry point — try tiers in order for a single shelter. */
 export async function getRouteToShelter(
   start: LatLng,
   shelter: Shelter,
@@ -219,30 +230,43 @@ export async function getRouteToShelter(
   return haversineFallback(start, shelter);
 }
 
-/** Fetch routes to every shelter. Parallel. */
+/** Fetch routes to all of a (small!) set of shelters in parallel. */
 export async function getRoutesToAllShelters(
   start: LatLng,
-  shelters: Shelter[] = SHELTERS,
+  shelters: readonly Shelter[] = SHELTERS,
   options?: { allowLive?: boolean },
 ): Promise<RouteResult[]> {
   return Promise.all(shelters.map((s) => getRouteToShelter(start, s, options)));
 }
 
-/** Find nearest by *route* distance (not straight-line) once we've fetched them. */
+/**
+ * Find the nearest shelter by *route* distance.
+ *
+ * Performance strategy:
+ *   1. Haversine top-N (default 10) candidates from the full dataset.
+ *   2. OSRM routes for just those N.
+ *   3. Pick the smallest actual route distance.
+ *   4. If all OSRM calls failed, the best haversine candidate wins.
+ */
 export async function findNearestByRouteDistance(
   start: LatLng,
-  shelters: Shelter[] = SHELTERS,
-  options?: { allowLive?: boolean },
+  shelters: readonly Shelter[] = SHELTERS,
+  options?: { allowLive?: boolean; candidateCount?: number },
 ): Promise<{ shelter: Shelter; route: RouteResult }> {
-  const routes = await getRoutesToAllShelters(start, shelters, options);
+  if (shelters.length === 0) {
+    throw new Error('No shelters available.');
+  }
+  const count = options?.candidateCount ?? NEAREST_CANDIDATE_COUNT;
+  const candidates = nearestByStraightLine(start, shelters, Math.min(count, shelters.length));
+  const routes = await getRoutesToAllShelters(start, candidates, options);
   let best = 0;
   for (let i = 1; i < routes.length; i++) {
     if (routes[i].distanceMeters < routes[best].distanceMeters) best = i;
   }
-  return { shelter: shelters[best], route: routes[best] };
+  return { shelter: candidates[best], route: routes[best] };
 }
 
-/** Convert a RouteResult back to the legacy RoutePolyline shape the SVG canvas wants. */
+/** Legacy adapter — kept for any external consumer. */
 export function routeResultToPolyline(r: RouteResult): RoutePolyline {
   return {
     shelterId: r.shelterId,
@@ -252,7 +276,7 @@ export function routeResultToPolyline(r: RouteResult): RoutePolyline {
   };
 }
 
-/** Default start position: device geolocation if available, otherwise hardcoded demo. */
+/** Default start position: hardcoded demo (overridden by device geolocation in UI). */
 export function getDemoStart(): LatLng {
   // HARDCODED DEMO USER LOCATION - used only when browser geolocation is unavailable.
   return { lat: DEMO_USER_LOCATION.lat, lng: DEMO_USER_LOCATION.lng };

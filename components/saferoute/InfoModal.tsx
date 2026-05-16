@@ -1,6 +1,7 @@
 /*
  * SafeRoute Varjumine — About / data-transparency modal.
- * Surfaces the "this is a prototype with demo data" disclaimer.
+ * Surfaces the "this is a prototype with hardcoded official-data snapshot"
+ * disclaimer.
  */
 
 import { ShieldAlert, X } from 'lucide-react-native';
@@ -8,6 +9,7 @@ import { Modal, Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/ui/text';
+import { shelterDataSource } from '@/src/data/officialShelters';
 
 export function InfoModal({
   visible,
@@ -53,18 +55,35 @@ export function InfoModal({
                 It is not an official emergency system. Always follow official instructions.
               </Text>
 
+              <View className="mt-3 rounded-xl bg-emerald-500/15 border border-emerald-500/40 px-3 py-2.5">
+                <Text className="text-emerald-300 text-[12px] font-semibold">
+                  Päästeamet data snapshot
+                </Text>
+                <Text className="text-emerald-200/90 text-[11.5px] mt-1 leading-[16px]">
+                  Shelter locations are hardcoded from a Päästeamet open-data
+                  snapshot imported on {shelterDataSource.importedAt}. Data may
+                  change on the official source. The app does not fetch shelter
+                  data live at runtime.
+                </Text>
+                <Text className="text-emerald-200/80 text-[10.5px] mt-1.5 leading-[14px]">
+                  Source · {shelterDataSource.sourceName}
+                  {'\n'}
+                  {shelterDataSource.sourcePageUrl}
+                  {'\n'}
+                  {shelterDataSource.licenseNote}
+                </Text>
+              </View>
+
               <View className="mt-3 rounded-xl bg-amber-500/15 border border-amber-500/40 px-3 py-2.5">
                 <Text className="text-amber-300 text-[12px] font-semibold">
                   Demo prototype
                 </Text>
                 <Text className="text-amber-200/90 text-[11.5px] mt-1 leading-[16px]">
-                  This prototype uses real interactive map tiles when online
-                  (OpenFreeMap, OSM-based, no API key). Shelter data, danger
-                  zone, and the offline walking graph are hardcoded demo data.
-                  Live routing uses the public OSRM demo endpoint
-                  (router.project-osrm.org); offline routing falls back to a
-                  simplified local Dijkstra over a hand-drawn pedestrian graph.
-                  This is not official emergency information.
+                  Map tiles load from OpenFreeMap (OSM-based, no API key) when
+                  online. Live walking routes use the public OSRM demo endpoint
+                  (router.project-osrm.org). When OSRM is unavailable the app
+                  falls back to a straight-line distance estimate, clearly
+                  labelled. The hardcoded danger zone is visual only.
                 </Text>
               </View>
 
@@ -75,26 +94,26 @@ export function InfoModal({
                 <View className="flex-row items-center gap-2">
                   <View style={{ backgroundColor: '#F5C518' }} className="h-3 w-3 rounded-full" />
                   <Text className="text-foreground text-[12.5px]">
-                    SA1 — Temporary cover (minutes)
+                    SA1 — Temporary cover (not in this dataset)
                   </Text>
                 </View>
                 <View className="flex-row items-center gap-2">
                   <View style={{ backgroundColor: '#2F80ED' }} className="h-3 w-3 rounded-full" />
                   <Text className="text-foreground text-[12.5px]">
-                    SA2 — Stronger shelter (short / medium)
+                    SA2 — Stronger shelter (not in this dataset)
                   </Text>
                 </View>
                 <View className="flex-row items-center gap-2">
                   <View style={{ backgroundColor: '#21C45D' }} className="h-3 w-3 rounded-full" />
                   <Text className="text-foreground text-[12.5px]">
-                    SA3 — Long-term / official shelter
+                    SA3 — Official public shelter (Päästeamet)
                   </Text>
                 </View>
               </View>
 
               <Text className="text-[11px] text-muted-foreground mt-3 italic">
-                No login, no backend. Map tiles load from OpenFreeMap when
-                online; the app shell, shelter data, and walking graph stay on
+                No login, no backend. Shelter data, the danger zone, and the
+                offline fallback graph are bundled with the app and remain on
                 this device.
               </Text>
             </ScrollView>

@@ -1,30 +1,30 @@
 /*
  * SafeRoute Varjumine — shelter detail bottom sheet.
  *
- * Two states: collapsed (peek), expanded (route + instructions).
- * Drag handle is functional via PanGesture to feel like a real map sheet.
+ * Renders official Päästeamet shelter records. Fields that are NOT in the
+ * source dataset (capacity, water, power, accessibility, safety score) are
+ * NOT shown — we do not invent missing official attributes.
  *
- * Route source is surfaced explicitly:
- *   - "Live route · OSRM foot/walking"  (online OSRM-compatible endpoint)
- *   - "Offline route · simplified demo walking graph"  (local Dijkstra)
- *   - "Demo fallback · straight-line estimate"  (haversine)
+ * Two states: collapsed (peek), expanded (route + instructions).
+ * Drag handle is functional via PanGesture.
+ *
+ * Route source labels:
+ *   - "Live walking route"           (online OSRM-compatible endpoint)
+ *   - "Offline demo graph route"     (legacy local Dijkstra)
+ *   - "Fallback distance estimate"   (haversine straight-line)
  */
 
 import { useEffect } from 'react';
 import {
-  Accessibility,
   ActivityIcon,
   BadgeCheck,
   BookmarkPlus,
-  CircleCheck,
-  CircleX,
-  Droplets,
   Footprints,
+  MapPin,
   Navigation,
   Radio,
-  Users,
+  ShieldCheck,
   WifiOff,
-  Zap,
 } from 'lucide-react-native';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -39,10 +39,10 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { Text } from '@/components/ui/text';
-import { cn } from '@/lib/utils';
-import { ROUTE_INSTRUCTIONS, type Shelter } from '@/lib/shelters';
-import type { RouteResult, RouteSource } from '@/lib/routing';
 import { SHELTER_COLORS } from '@/lib/constants';
+import type { RouteResult, RouteSource } from '@/lib/routing';
+import { ROUTE_INSTRUCTIONS, type Shelter } from '@/lib/shelters';
+import { cn } from '@/lib/utils';
 
 type RouteUiState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -75,17 +75,11 @@ function Stat({
       {icon}
       <View className="flex-1">
         <Text className="text-muted-foreground text-[11px]">{label}</Text>
-        <Text className="text-foreground text-[13px] font-semibold">{value}</Text>
+        <Text className="text-foreground text-[13px] font-semibold" numberOfLines={1}>
+          {value}
+        </Text>
       </View>
     </View>
-  );
-}
-
-function YesNoIcon({ value }: { value: boolean }) {
-  return value ? (
-    <CircleCheck color="#22c55e" size={16} />
-  ) : (
-    <CircleX color="#94a3b8" size={16} />
   );
 }
 
@@ -188,11 +182,15 @@ export function ShelterSheet({
   if (!shelter) return null;
 
   const color = SHELTER_COLORS[shelter.type];
-  // Prefer live route distances when available — they're the real numbers.
-  const distanceMeters = route?.distanceMeters ?? shelter.distanceMeters;
-  const walkingMin = route?.walkingTimeMinutes ?? shelter.walkingTimeMinutes;
+  const distanceMeters = route?.distanceMeters;
+  const walkingMin = route?.walkingTimeMinutes;
   const distanceLabel =
-    distanceMeters >= 1000 ? `${(distanceMeters / 1000).toFixed(2)} km` : `${distanceMeters} m`;
+    distanceMeters == null
+      ? 'Tap Navigate to compute'
+      : distanceMeters >= 1000
+        ? `${(distanceMeters / 1000).toFixed(2)} km`
+        : `${distanceMeters} m`;
+  const walkingLabel = walkingMin == null ? '—' : `${walkingMin} min`;
 
   return (
     <>
@@ -239,8 +237,8 @@ export function ShelterSheet({
                 <Text className="text-foreground text-[18px] font-semibold leading-[22px]">
                   {shelter.name}
                 </Text>
-                <Text className="text-muted-foreground text-[13px] mt-0.5">
-                  {distanceLabel} · {walkingMin} min walk
+                <Text className="text-muted-foreground text-[12px] mt-1" numberOfLines={2}>
+                  {shelter.address}
                 </Text>
               </View>
               <Pressable
@@ -253,77 +251,68 @@ export function ShelterSheet({
               </Pressable>
             </View>
 
-            <Text className="text-muted-foreground text-[12px] mt-2">
-              {shelter.description}
-            </Text>
+            {/* Source / official badges */}
+            <View className="mt-2.5 flex-row flex-wrap gap-1.5">
+              <View className="flex-row items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-1">
+                <ShieldCheck color="#34d399" size={12} />
+                <Text className="text-[10.5px] font-semibold text-emerald-300">
+                  Official public shelter dataset
+                </Text>
+              </View>
+              <View className="flex-row items-center gap-1 rounded-full border border-border bg-secondary/60 px-2 py-1">
+                <BadgeCheck color="#22d3ee" size={12} />
+                <Text className="text-[10.5px] font-semibold text-foreground">SA3</Text>
+              </View>
+            </View>
 
+            {/* Stats grid */}
             <View className="mt-3 flex-row flex-wrap gap-2">
               <Stat
                 icon={<Footprints color="#60a5fa" size={16} />}
-                label="Distance"
+                label="Route distance"
                 value={distanceLabel}
               />
               <Stat
                 icon={<Navigation color="#60a5fa" size={16} />}
                 label="Walking"
-                value={`${walkingMin} min`}
+                value={walkingLabel}
               />
               <Stat
-                icon={<Users color="#a78bfa" size={16} />}
-                label="Capacity"
-                value={String(shelter.capacity)}
+                icon={<MapPin color="#a78bfa" size={16} />}
+                label="Municipality"
+                value={shelter.municipality || 'Not provided in source data'}
               />
               <Stat
-                icon={<Accessibility color="#34d399" size={16} />}
-                label="Accessible"
-                value={shelter.accessible ? 'Yes' : 'No'}
+                icon={<MapPin color="#34d399" size={16} />}
+                label="County"
+                value={shelter.county || 'Not provided in source data'}
               />
             </View>
 
+            {/* Source attribution */}
             <View className="mt-3 rounded-xl border border-border bg-secondary/40 px-3 py-2.5">
-              <View className="flex-row items-center justify-between">
-                <View className="flex-row items-center gap-1.5">
-                  <Zap color="#f59e0b" size={14} />
-                  <Text className="text-foreground text-[12px]">Power</Text>
-                </View>
-                <YesNoIcon value={shelter.hasPower} />
-              </View>
-              <View className="h-px bg-border my-2" />
-              <View className="flex-row items-center justify-between">
-                <View className="flex-row items-center gap-1.5">
-                  <Droplets color="#38bdf8" size={14} />
-                  <Text className="text-foreground text-[12px]">Water</Text>
-                </View>
-                <YesNoIcon value={shelter.hasWater} />
-              </View>
-              <View className="h-px bg-border my-2" />
-              <View className="flex-row items-center justify-between">
-                <View className="flex-row items-center gap-1.5">
-                  <BadgeCheck color="#22d3ee" size={14} />
-                  <Text className="text-foreground text-[12px]">Verified</Text>
-                </View>
-                <YesNoIcon value={shelter.verified} />
-              </View>
-              <View className="h-px bg-border my-2" />
-              <View className="flex-row items-center justify-between">
-                <Text className="text-muted-foreground text-[11px]">Last checked</Text>
+              <View className="flex-row items-center justify-between mb-1">
+                <Text className="text-muted-foreground text-[11px]">Source</Text>
                 <Text className="text-foreground text-[12px] font-medium">
-                  {shelter.lastChecked}
+                  Päästeamet open data
                 </Text>
               </View>
-              <View className="h-px bg-border my-2" />
-              <View className="flex-row items-center justify-between">
-                <Text className="text-muted-foreground text-[11px]">
-                  Safety score (info only)
-                </Text>
+              <View className="h-px bg-border my-1.5" />
+              <View className="flex-row items-center justify-between mb-1">
+                <Text className="text-muted-foreground text-[11px]">Snapshot</Text>
                 <Text className="text-foreground text-[12px] font-medium">
-                  {shelter.safetyScore}/100
+                  {shelter.dataSnapshotDate}
                 </Text>
+              </View>
+              <View className="h-px bg-border my-1.5" />
+              <View className="flex-row items-center justify-between">
+                <Text className="text-muted-foreground text-[11px]">Record id</Text>
+                <Text className="text-foreground text-[12px] font-medium">{shelter.id}</Text>
               </View>
             </View>
 
             <Text className="text-[10.5px] text-muted-foreground mt-2 italic">
-              Demo shelter data, not official information
+              Capacity, water, power and accessibility are not provided in the source data.
             </Text>
 
             {routeShown ? (
@@ -347,7 +336,7 @@ export function ShelterSheet({
                 {route ? (
                   <>
                     <Text className="text-muted-foreground text-[12px] mb-1">
-                      {distanceLabel} · {walkingMin} min walk
+                      {distanceLabel} · {walkingLabel} walk
                     </Text>
                     <Text className="text-muted-foreground text-[10.5px] italic mb-2">
                       {route.sourceLabel}
@@ -359,7 +348,10 @@ export function ShelterSheet({
                           Turn-by-turn
                         </Text>
                         {route.steps.slice(0, 6).map((step, i) => (
-                          <View key={`step-${i}-${step.slice(0, 16)}`} className="flex-row items-start gap-2 mt-1">
+                          <View
+                            key={`step-${i}-${step.slice(0, 16)}`}
+                            className="flex-row items-start gap-2 mt-1"
+                          >
                             <Text className="text-muted-foreground text-[11px] w-5">
                               {i + 1}.
                             </Text>
@@ -430,7 +422,7 @@ function routeLabel(source: RouteSource): string {
     case 'offline-graph':
       return 'Offline graph';
     case 'fallback-line':
-      return 'Demo fallback';
+      return 'Fallback estimate';
     default:
       return 'Route';
   }

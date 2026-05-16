@@ -5,8 +5,13 @@
  *   web    → maplibre-gl with OpenFreeMap bright/dark vector tiles
  *   native → react-native-maps with OpenStreetMap raster tiles
  *
- * Other layers (composed on top of the map):
+ * Shelter dataset: HARDCODED Päästeamet open-data snapshot
+ * (src/data/officialShelters.ts). The app does NOT fetch shelter data at
+ * runtime.
+ *
+ * Layout:
  *   - Top status pills (crisis / offline / demo data / info)
+ *   - Region filter chips (Near me / Tallinn / Harju / All Estonia)
  *   - Right floating stack (offline plan, map style, locate)
  *   - "Find nearest shelter" CTA
  *   - Bottom sheet with shelter detail + route source + turn-by-turn
@@ -16,7 +21,7 @@
  */
 
 import { useCallback, useEffect, useMemo } from 'react';
-import { Platform, Pressable, View } from 'react-native';
+import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FindNearestFab, MapFabStack } from '@/components/saferoute/FloatingControls';
@@ -26,8 +31,17 @@ import SafeRouteMap from '@/components/SafeRouteMap';
 import { ShelterSheet } from '@/components/saferoute/ShelterSheet';
 import { TopStatusBar } from '@/components/saferoute/TopStatusBar';
 import { Text } from '@/components/ui/text';
-import { SHELTERS, type Shelter } from '@/lib/shelters';
 import { useSafeRouteStore } from '@/lib/saferouteStore';
+import { SHELTERS, type Shelter } from '@/lib/shelters';
+import { cn } from '@/lib/utils';
+import { filterShelters, type ShelterRegion } from '@/src/data/officialShelters';
+
+const REGION_OPTIONS: { value: ShelterRegion; label: string }[] = [
+  { value: 'near-me', label: 'Near me' },
+  { value: 'tallinn', label: 'Tallinn' },
+  { value: 'harju', label: 'Harju' },
+  { value: 'all', label: 'All Estonia' },
+];
 
 export default function MapScreen() {
   const {
@@ -37,6 +51,7 @@ export default function MapScreen() {
     offlineMode,
     offlinePlanOpen,
     infoOpen,
+    region,
     fallbacks,
     userLocation,
     isLiveUserLocation,
@@ -54,23 +69,35 @@ export default function MapScreen() {
     setOfflinePlanOpen,
     setInfoOpen,
     setMapStyle,
+    setRegion,
     setUserLocation,
     bumpRecenter,
     saveFallback,
     clearRoute,
   } = useSafeRouteStore();
 
+  // Region-filtered shelters for the map view.
+  const visibleShelters = useMemo<Shelter[]>(
+    () => filterShelters(region, isLiveUserLocation ? userLocation : undefined),
+    [region, isLiveUserLocation, userLocation],
+  );
+
   const selectedShelter: Shelter | null = useMemo(() => {
     if (selectedShelterId === null) return null;
+    // Look up in the full dataset, not just visible — so saved/selected shelters
+    // outside the active filter still resolve.
     return SHELTERS.find((s) => s.id === selectedShelterId) ?? null;
   }, [selectedShelterId]);
 
   const isSelectedSaved = useMemo(() => {
     if (!selectedShelter) return false;
-    return Object.values(fallbacks).some((f) => f?.shelterId === selectedShelter.id);
+    return Object.values(fallbacks).some(
+      (f) => f?.shelterId === selectedShelter.id,
+    );
   }, [fallbacks, selectedShelter]);
 
-  // Try browser geolocation once on web for the "Using device location" label.
+  // Try browser geolocation once on web for the "Using device location" label
+  // and to enable a useful "Near me" default.
   useEffect(() => {
     if (Platform.OS !== 'web') return undefined;
     if (typeof navigator === 'undefined' || !navigator.geolocation) return undefined;
@@ -78,7 +105,10 @@ export default function MapScreen() {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         if (cancelled) return;
-        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }, true);
+        setUserLocation(
+          { lat: pos.coords.latitude, lng: pos.coords.longitude },
+          true,
+        );
       },
       () => {
         // Denied / unavailable — keep HARDCODED DEMO USER LOCATION.
@@ -126,7 +156,7 @@ export default function MapScreen() {
   return (
     <View className="flex-1 bg-background">
       <SafeRouteMap
-        shelters={SHELTERS}
+        shelters={visibleShelters}
         selectedShelterId={selectedShelterId}
         route={route}
         userLocation={userLocation}
@@ -165,9 +195,9 @@ export default function MapScreen() {
               Map: OpenFreeMap tiles · OSM data
             </Text>
           </View>
-          <View className="rounded-full bg-amber-500/20 border border-amber-500/40 px-2.5 py-1">
-            <Text className="text-[10.5px] font-semibold text-amber-300">
-              Demo shelters · demo danger zone
+          <View className="rounded-full bg-emerald-500/15 border border-emerald-500/40 px-2.5 py-1">
+            <Text className="text-[10.5px] font-semibold text-emerald-300">
+              Päästeamet data snapshot · {visibleShelters.length} shelters
             </Text>
           </View>
         </View>
@@ -181,6 +211,44 @@ export default function MapScreen() {
         onOpenInfo={() => setInfoOpen(true)}
       />
 
+      {/* Region filter chips, sitting just below the top status bar */}
+      <SafeAreaView
+        edges={['top']}
+        pointerEvents="box-none"
+        style={{ position: 'absolute', top: 96, left: 0, right: 0, zIndex: 18 }}
+      >
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
+        >
+          {REGION_OPTIONS.map((opt) => {
+            const active = region === opt.value;
+            return (
+              <Pressable
+                key={opt.value}
+                onPress={() => setRegion(opt.value)}
+                accessibilityRole="button"
+                accessibilityLabel={`Filter shelters: ${opt.label}`}
+                className={cn(
+                  'rounded-full border px-3 py-1.5 min-h-[34px] flex-row items-center',
+                  active ? 'bg-primary border-primary' : 'bg-card/90 border-border',
+                )}
+              >
+                <Text
+                  className={cn(
+                    'text-[12px] font-semibold',
+                    active ? 'text-primary-foreground' : 'text-foreground',
+                  )}
+                >
+                  {opt.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </SafeAreaView>
+
       {/* Persistent disclaimer */}
       <View
         pointerEvents="none"
@@ -191,9 +259,10 @@ export default function MapScreen() {
           zIndex: 12,
         }}
       >
-        <View className="rounded-xl bg-card/90 border border-border px-2.5 py-1.5 max-w-[220px]">
+        <View className="rounded-xl bg-card/90 border border-border px-2.5 py-1.5 max-w-[240px]">
           <Text className="text-[10.5px] text-muted-foreground leading-[14px]">
-            SafeRoute is a civilian preparedness assistant, not an official emergency system. Always follow official instructions.
+            SafeRoute is a civilian preparedness assistant, not an official
+            emergency system. Always follow official instructions.
           </Text>
         </View>
       </View>

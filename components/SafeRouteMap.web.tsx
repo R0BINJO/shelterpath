@@ -6,25 +6,27 @@
  *   - dark   style: https://tiles.openfreemap.org/styles/dark
  *
  * PRODUCTION OFFLINE MAP TODO: replace the online style with a local PMTiles
- * file (e.g. /maps/tallinn.pmtiles). Sketch:
+ * file (e.g. /maps/estonia.pmtiles). Sketch:
  *
  *   import maplibregl from 'maplibre-gl';
  *   import { Protocol } from 'pmtiles';
  *   const protocol = new Protocol();
  *   maplibregl.addProtocol('pmtiles', protocol.tile);
- *   // ...then use a style whose sources point at 'pmtiles:///maps/tallinn.pmtiles'.
  *
  * Do NOT bulk-download OpenStreetMap raster tiles in production.
  */
 
-import maplibregl, { type Map as MaplibreMap, type LngLatBoundsLike } from 'maplibre-gl';
+import maplibregl, {
+  type Map as MaplibreMap,
+  type LngLatBoundsLike,
+} from 'maplibre-gl';
 // oxlint-disable-next-line import/no-unassigned-import -- MapLibre stylesheet
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 
-import { DEMO_DANGER_ZONE, type Shelter } from '@/lib/shelters';
 import { SHELTER_COLORS } from '@/lib/constants';
+import { DEMO_DANGER_ZONE, type Shelter } from '@/lib/shelters';
 
 import type { SafeRouteMapProps, SafeRouteMapStyle } from './SafeRouteMap.types';
 
@@ -33,22 +35,27 @@ const STYLE_URLS: Record<SafeRouteMapStyle, string> = {
   dark: 'https://tiles.openfreemap.org/styles/dark',
 };
 
-const TALLINN_BOUNDS: LngLatBoundsLike = [
-  [24.6, 59.36], // SW
-  [24.95, 59.5], // NE
+// Estonia bounding box (loose) — gives users freedom to pan across the country
+// without losing context.
+const ESTONIA_BOUNDS: LngLatBoundsLike = [
+  [21.5, 57.4], // SW
+  [28.4, 59.9], // NE
 ];
 
 function dangerCirclePolygon(): GeoJSON.Feature<GeoJSON.Polygon> {
-  // Approx a circle around the demo danger zone — purely visual.
   const { centerLat, centerLng, radiusMeters } = DEMO_DANGER_ZONE;
   const points = 48;
   const coords: [number, number][] = [];
   const earth = 6378137;
   for (let i = 0; i <= points; i++) {
     const angle = (i / points) * 2 * Math.PI;
-    const dx = (radiusMeters * Math.cos(angle)) / (earth * Math.cos((centerLat * Math.PI) / 180));
+    const dx =
+      (radiusMeters * Math.cos(angle)) / (earth * Math.cos((centerLat * Math.PI) / 180));
     const dy = (radiusMeters * Math.sin(angle)) / earth;
-    coords.push([centerLng + (dx * 180) / Math.PI, centerLat + (dy * 180) / Math.PI]);
+    coords.push([
+      centerLng + (dx * 180) / Math.PI,
+      centerLat + (dy * 180) / Math.PI,
+    ]);
   }
   return {
     type: 'Feature',
@@ -57,7 +64,9 @@ function dangerCirclePolygon(): GeoJSON.Feature<GeoJSON.Polygon> {
   };
 }
 
-function sheltersToGeoJson(shelters: Shelter[]): GeoJSON.FeatureCollection<GeoJSON.Point> {
+function sheltersToGeoJson(
+  shelters: readonly Shelter[],
+): GeoJSON.FeatureCollection<GeoJSON.Point> {
   return {
     type: 'FeatureCollection',
     features: shelters.map((s) => ({
@@ -98,19 +107,20 @@ export default function SafeRouteMap({
   const styleLoadedRef = useRef(false);
   const onSelectRef = useRef(onSelectShelter);
   onSelectRef.current = onSelectShelter;
+  const sheltersRef = useRef(shelters);
+  sheltersRef.current = shelters;
+  const selectedRef = useRef(selectedShelterId);
+  selectedRef.current = selectedShelterId;
 
-  // Init map once.
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return undefined;
 
-    // HARDCODED DEMO USER LOCATION used as initial centre when device location
-    // isn't yet available.
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: STYLE_URLS[crisisMode ? 'dark' : mapStyle],
       center: [userLocation.lng, userLocation.lat],
-      zoom: 14,
-      maxBounds: TALLINN_BOUNDS,
+      zoom: 13,
+      maxBounds: ESTONIA_BOUNDS,
       dragPan: true,
       scrollZoom: true,
       touchZoomRotate: true,
@@ -172,7 +182,7 @@ export default function SafeRouteMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || recenterToken === undefined) return;
-    map.easeTo({ center: [userLocation.lng, userLocation.lat], zoom: 15, duration: 600 });
+    map.easeTo({ center: [userLocation.lng, userLocation.lat], zoom: 14, duration: 600 });
   }, [recenterToken, userLocation]);
 
   // Imperative fit-to-route.
@@ -182,24 +192,24 @@ export default function SafeRouteMap({
     const coords = route.coordinates;
     if (coords.length < 2) return;
     const bounds = coords.reduce(
-      (b, c) => b.extend(c),
+      (b, c) => b.extend(c as [number, number]),
       new maplibregl.LngLatBounds(coords[0], coords[0]),
     );
-    map.fitBounds(bounds, { padding: { top: 100, bottom: 360, left: 60, right: 60 }, maxZoom: 16, duration: 700 });
+    map.fitBounds(bounds, {
+      padding: { top: 100, bottom: 360, left: 60, right: 60 },
+      maxZoom: 16,
+      duration: 700,
+    });
   }, [fitRouteToken, route]);
 
   function attachLayers(map: MaplibreMap) {
-    // Danger zone (visual only)
     if (!map.getSource('saferoute-danger')) {
       map.addSource('saferoute-danger', { type: 'geojson', data: dangerCirclePolygon() });
       map.addLayer({
         id: 'saferoute-danger-fill',
         type: 'fill',
         source: 'saferoute-danger',
-        paint: {
-          'fill-color': SHELTER_COLORS.danger,
-          'fill-opacity': 0.7,
-        },
+        paint: { 'fill-color': SHELTER_COLORS.danger, 'fill-opacity': 0.7 },
       });
       map.addLayer({
         id: 'saferoute-danger-line',
@@ -213,7 +223,6 @@ export default function SafeRouteMap({
       });
     }
 
-    // Route line
     if (!map.getSource('saferoute-route')) {
       map.addSource('saferoute-route', {
         type: 'geojson',
@@ -235,7 +244,6 @@ export default function SafeRouteMap({
       });
     }
 
-    // User location
     if (!map.getSource('saferoute-user')) {
       map.addSource('saferoute-user', {
         type: 'geojson',
@@ -268,20 +276,62 @@ export default function SafeRouteMap({
       });
     }
 
-    // Shelter markers
     if (!map.getSource('saferoute-shelters')) {
       map.addSource('saferoute-shelters', {
         type: 'geojson',
         data: sheltersToGeoJson(shelters),
+        cluster: true,
+        clusterRadius: 48,
+        clusterMaxZoom: 12,
       });
+
+      // Cluster bubbles
+      map.addLayer({
+        id: 'saferoute-clusters',
+        type: 'circle',
+        source: 'saferoute-shelters',
+        filter: ['has', 'point_count'],
+        paint: {
+          'circle-color': SHELTER_COLORS.SA3,
+          'circle-opacity': 0.85,
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+          'circle-radius': [
+            'step',
+            ['get', 'point_count'],
+            16,
+            10,
+            20,
+            25,
+            24,
+            50,
+            30,
+          ],
+        },
+      });
+      map.addLayer({
+        id: 'saferoute-cluster-count',
+        type: 'symbol',
+        source: 'saferoute-shelters',
+        filter: ['has', 'point_count'],
+        layout: {
+          'text-field': ['get', 'point_count_abbreviated'],
+          'text-size': 12,
+          'text-font': ['Noto Sans Bold', 'Open Sans Bold', 'Arial Unicode MS Bold'],
+        },
+        paint: { 'text-color': '#0b1320' },
+      });
+
+      // Unclustered individual shelters
       map.addLayer({
         id: 'saferoute-shelters-halo',
         type: 'circle',
         source: 'saferoute-shelters',
+        filter: ['!', ['has', 'point_count']],
         paint: {
           'circle-radius': [
             'case',
-            ['==', ['get', 'id'], selectedShelterId ?? -1],
+            ['==', ['get', 'id'], selectedShelterId ?? ''],
             22,
             0,
           ],
@@ -293,45 +343,49 @@ export default function SafeRouteMap({
         id: 'saferoute-shelters-circle',
         type: 'circle',
         source: 'saferoute-shelters',
+        filter: ['!', ['has', 'point_count']],
         paint: {
           'circle-radius': [
             'case',
-            ['==', ['get', 'id'], selectedShelterId ?? -1],
+            ['==', ['get', 'id'], selectedShelterId ?? ''],
             14,
-            11,
+            10,
           ],
           'circle-color': ['get', 'color'],
           'circle-stroke-color': '#ffffff',
           'circle-stroke-width': 2.5,
         },
       });
-      map.addLayer({
-        id: 'saferoute-shelters-label',
-        type: 'symbol',
-        source: 'saferoute-shelters',
-        layout: {
-          'text-field': ['get', 'type'],
-          'text-size': 10,
-          'text-font': ['Noto Sans Bold', 'Open Sans Bold', 'Arial Unicode MS Bold'],
-          'text-allow-overlap': true,
-          'text-ignore-placement': true,
-        },
-        paint: {
-          'text-color': '#0b1320',
-        },
+
+      map.on('click', 'saferoute-clusters', (e) => {
+        const f = e.features?.[0];
+        if (!f) return;
+        const src = map.getSource('saferoute-shelters') as maplibregl.GeoJSONSource;
+        const clusterId = f.properties?.cluster_id as number | undefined;
+        if (clusterId == null) return;
+        src.getClusterExpansionZoom(clusterId).then((zoom) => {
+          const coords = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+          map.easeTo({ center: coords, zoom });
+        }).catch(() => {});
       });
 
       map.on('click', 'saferoute-shelters-circle', (e) => {
         const f = e.features?.[0];
         if (!f) return;
-        const id = Number(f.properties?.id);
-        const found = shelters.find((s) => s.id === id);
+        const id = String(f.properties?.id ?? '');
+        const found = sheltersRef.current.find((s) => s.id === id);
         if (found) onSelectRef.current(found);
       });
       map.on('mouseenter', 'saferoute-shelters-circle', () => {
         map.getCanvas().style.cursor = 'pointer';
       });
       map.on('mouseleave', 'saferoute-shelters-circle', () => {
+        map.getCanvas().style.cursor = '';
+      });
+      map.on('mouseenter', 'saferoute-clusters', () => {
+        map.getCanvas().style.cursor = 'pointer';
+      });
+      map.on('mouseleave', 'saferoute-clusters', () => {
         map.getCanvas().style.cursor = '';
       });
     }
@@ -346,15 +400,14 @@ export default function SafeRouteMap({
 
   function getGeoJsonSource(map: MaplibreMap, id: string): maplibregl.GeoJSONSource | undefined {
     const src = map.getSource(id);
-    // GeoJSONSource is the only source type we ever add by this name.
     return src as maplibregl.GeoJSONSource | undefined;
   }
 
   function updateData(
     map: MaplibreMap,
     args: {
-      shelters: Shelter[];
-      selectedShelterId: number | null;
+      shelters: readonly Shelter[];
+      selectedShelterId: string | null;
       routeCoords: [number, number][] | null;
       userLocation: { lat: number; lng: number };
     },
@@ -364,15 +417,15 @@ export default function SafeRouteMap({
     if (map.getLayer('saferoute-shelters-halo')) {
       map.setPaintProperty('saferoute-shelters-halo', 'circle-radius', [
         'case',
-        ['==', ['get', 'id'], args.selectedShelterId ?? -1],
+        ['==', ['get', 'id'], args.selectedShelterId ?? ''],
         22,
         0,
       ]);
       map.setPaintProperty('saferoute-shelters-circle', 'circle-radius', [
         'case',
-        ['==', ['get', 'id'], args.selectedShelterId ?? -1],
+        ['==', ['get', 'id'], args.selectedShelterId ?? ''],
         14,
-        11,
+        10,
       ]);
     }
 
@@ -392,8 +445,7 @@ export default function SafeRouteMap({
     });
   }
 
-  // Container — let parent View flex.
-  void isLiveUserLocation; // marker is identical visually; label handled by screen UI.
+  void isLiveUserLocation;
 
   return (
     <View style={{ flex: 1 }}>

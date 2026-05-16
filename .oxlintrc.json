@@ -52,7 +52,7 @@
       }
     ]
   },
-  "ignorePatterns": ["dist", "context", ".expo", "node_modules", "android/app/build"],
+  "ignorePatterns": ["dist", "context", ".expo", "node_modules", "android/app/build", "scripts"],
   "overrides": [
     {
       "files": ["metro.config.cjs", "*.config.js"],

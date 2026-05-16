@@ -1,12 +1,12 @@
 /*
  * SafeRoute Varjumine — client state.
  *
- * Persists Offline Plan data (fallback shelters, family meeting point, emergency notes)
- * to AsyncStorage (the React Native equivalent of localStorage — used on web too
- * via the same package).
+ * Persists Offline Plan data (fallback shelters, family meeting point,
+ * emergency notes) to AsyncStorage (the React Native equivalent of
+ * localStorage — used on web too via the same package).
  *
- * Shelter / danger-zone / walking-graph data lives in lib/shelters.ts and
- * lib/walkingGraph.ts and is all hardcoded demo data.
+ * The shelter dataset itself lives in src/data/officialShelters.ts and is
+ * a hardcoded snapshot of the Päästeamet open-data feed.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,27 +20,33 @@ import {
   type LatLng,
   type RouteResult,
 } from './routing';
-import type { Shelter } from './shelters';
+import { SHELTERS, type Shelter } from './shelters';
+import type { ShelterRegion } from '@/src/data/officialShelters';
 
 export type FallbackSlot = 'home' | 'work' | 'school' | 'generic';
 
 export type SavedFallback = {
   slot: FallbackSlot;
-  shelterId: number;
+  shelterId: string;
   shelterName: string;
+  shelterAddress: string;
+  shelterLat: number;
+  shelterLng: number;
   savedAt: string;
+  dataSnapshotDate: string;
 };
 
 export type RouteState = 'idle' | 'loading' | 'ready' | 'error';
 
 type SafeRouteState = {
   // UI state (not persisted)
-  selectedShelterId: number | null;
+  selectedShelterId: string | null;
   showRoute: boolean;
   crisisMode: boolean;
   offlineMode: boolean;
   offlinePlanOpen: boolean;
   infoOpen: boolean;
+  region: ShelterRegion;
 
   // Real interactive map state (not persisted)
   userLocation: LatLng;
@@ -60,7 +66,7 @@ type SafeRouteState = {
   emergencyNotes: string;
 
   // Actions
-  selectShelter: (id: number | null) => void;
+  selectShelter: (id: string | null) => void;
   navigateToShelter: (shelter: Shelter) => Promise<void>;
   findNearest: () => Promise<void>;
   toggleCrisisMode: () => void;
@@ -68,6 +74,7 @@ type SafeRouteState = {
   setOfflinePlanOpen: (v: boolean) => void;
   setInfoOpen: (v: boolean) => void;
   setMapStyle: (style: 'bright' | 'dark') => void;
+  setRegion: (region: ShelterRegion) => void;
   setUserLocation: (loc: LatLng, live: boolean) => void;
   bumpRecenter: () => void;
   bumpFitRoute: () => void;
@@ -84,9 +91,10 @@ export const useSafeRouteStore = create<SafeRouteState>()(
       selectedShelterId: null,
       showRoute: false,
       crisisMode: true,
-      offlineMode: false, // start online so live OSRM is attempted
+      offlineMode: false,
       offlinePlanOpen: false,
       infoOpen: false,
+      region: 'tallinn', // sensible default until geolocation succeeds
 
       // HARDCODED DEMO USER LOCATION - used only when browser geolocation is unavailable
       userLocation: getDemoStart(),
@@ -105,7 +113,6 @@ export const useSafeRouteStore = create<SafeRouteState>()(
 
       selectShelter: (id) =>
         set((s) => {
-          // Selecting a different shelter clears the previously shown route.
           if (id === s.selectedShelterId) return { selectedShelterId: id };
           return {
             selectedShelterId: id,
@@ -145,10 +152,12 @@ export const useSafeRouteStore = create<SafeRouteState>()(
         const { userLocation, offlineMode } = get();
         set({ routeState: 'loading', routeError: null, showRoute: true });
         try {
+          // We pass the full official dataset; the routing service does the
+          // haversine top-10 pre-filter before issuing OSRM requests.
           const { shelter, route } = await findNearestByRouteDistance(
             userLocation,
-            undefined,
-            { allowLive: !offlineMode },
+            SHELTERS,
+            { allowLive: !offlineMode, candidateCount: 10 },
           );
           set((s) => ({
             selectedShelterId: shelter.id,
@@ -169,11 +178,14 @@ export const useSafeRouteStore = create<SafeRouteState>()(
       setOfflinePlanOpen: (v) => set({ offlinePlanOpen: v }),
       setInfoOpen: (v) => set({ infoOpen: v }),
       setMapStyle: (style) => set({ mapStyle: style }),
+      setRegion: (region) => set({ region }),
       setUserLocation: (loc, live) =>
         set((s) => ({
           userLocation: loc,
           isLiveUserLocation: live,
           recenterToken: s.recenterToken + 1,
+          // If the device is in Estonia we can now show "Near me" usefully.
+          region: live && s.region === 'tallinn' ? 'near-me' : s.region,
         })),
       bumpRecenter: () => set((s) => ({ recenterToken: s.recenterToken + 1 })),
       bumpFitRoute: () => set((s) => ({ fitRouteToken: s.fitRouteToken + 1 })),
@@ -186,7 +198,11 @@ export const useSafeRouteStore = create<SafeRouteState>()(
               slot,
               shelterId: shelter.id,
               shelterName: shelter.name,
+              shelterAddress: shelter.address,
+              shelterLat: shelter.lat,
+              shelterLng: shelter.lng,
               savedAt: new Date().toISOString(),
+              dataSnapshotDate: shelter.dataSnapshotDate,
             },
           },
         })),
@@ -202,7 +218,8 @@ export const useSafeRouteStore = create<SafeRouteState>()(
         set({ route: null, routeState: 'idle', showRoute: false, routeError: null }),
     }),
     {
-      name: 'saferoute.offline-plan.v2',
+      // Bump the persist key — previous shape used numeric ids.
+      name: 'saferoute.offline-plan.v3-official',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({
         fallbacks: s.fallbacks,

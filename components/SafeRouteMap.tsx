@@ -1,18 +1,8 @@
 /*
  * SafeRoute Varjumine — Native map (react-native-maps).
  *
- * Native fallback for the MapLibre web implementation. react-native-maps does
- * not render MapLibre vector styles natively, so we fall back to OSM raster
- * tiles via UrlTile. This keeps the UI consistent (real interactive map,
- * pan/pinch, real GeoJSON polylines) without paid SDKs or API keys.
- *
- * ONLINE DEMO MAP NATIVE: OpenStreetMap raster tiles (same data source family
- * as OpenFreeMap, just rastered). No API key.
- *
- * PRODUCTION OFFLINE MAP TODO:
- *   - Bundle a vector PMTiles file and serve via a native MapLibre SDK
- *     (`@maplibre/maplibre-react-native`), or
- *   - Ship a small raster MBTiles file and a self-hosted tile server.
+ * ONLINE DEMO MAP NATIVE: OpenStreetMap raster tiles via UrlTile (no API key).
+ * Vector PMTiles would require `@maplibre/maplibre-react-native`.
  */
 
 import { useEffect, useMemo, useRef } from 'react';
@@ -37,8 +27,8 @@ function regionFromUser(lat: number, lng: number): Region {
   return {
     latitude: lat,
     longitude: lng,
-    latitudeDelta: 0.025,
-    longitudeDelta: 0.025,
+    latitudeDelta: 0.08,
+    longitudeDelta: 0.08,
   };
 }
 
@@ -56,19 +46,24 @@ export default function SafeRouteMap({
 
   const initialRegion = useMemo(
     () => regionFromUser(userLocation.lat, userLocation.lng),
-    // initial only — subsequent moves are imperative
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- mount-time only
     [],
   );
 
   useEffect(() => {
     if (recenterToken === undefined) return;
-    mapRef.current?.animateToRegion(regionFromUser(userLocation.lat, userLocation.lng), 600);
+    mapRef.current?.animateToRegion(
+      regionFromUser(userLocation.lat, userLocation.lng),
+      600,
+    );
   }, [recenterToken, userLocation]);
 
   useEffect(() => {
     if (fitRouteToken === undefined || !route) return;
-    const coords = route.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+    const coords = route.coordinates.map(([lng, lat]) => ({
+      latitude: lat,
+      longitude: lng,
+    }));
     if (coords.length < 2) return;
     mapRef.current?.fitToCoordinates(coords, {
       edgePadding: { top: 120, bottom: 380, left: 60, right: 60 },
@@ -76,7 +71,8 @@ export default function SafeRouteMap({
     });
   }, [fitRouteToken, route]);
 
-  const routeCoords = route?.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng })) ?? [];
+  const routeCoords =
+    route?.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng })) ?? [];
 
   return (
     <View style={{ flex: 1 }}>
@@ -92,26 +88,23 @@ export default function SafeRouteMap({
         rotateEnabled={false}
         toolbarEnabled={false}
       >
-        {/* Real interactive map tiles (raster fallback on native). */}
         <UrlTile urlTemplate={TILE_URL} maximumZ={19} flipY={false} />
 
         {/* HARDCODED DEMO DANGER ZONE — visual only */}
         <Circle
-          center={{ latitude: DEMO_DANGER_ZONE.centerLat, longitude: DEMO_DANGER_ZONE.centerLng }}
+          center={{
+            latitude: DEMO_DANGER_ZONE.centerLat,
+            longitude: DEMO_DANGER_ZONE.centerLng,
+          }}
           radius={DEMO_DANGER_ZONE.radiusMeters}
           fillColor={SHELTER_COLORS.danger}
           strokeColor={SHELTER_COLORS.dangerStroke}
           strokeWidth={2}
         />
 
-        {/* Route polyline (white casing + blue line) */}
         {routeCoords.length >= 2 ? (
           <>
-            <Polyline
-              coordinates={routeCoords}
-              strokeColor="#ffffff"
-              strokeWidth={9}
-            />
+            <Polyline coordinates={routeCoords} strokeColor="#ffffff" strokeWidth={9} />
             <Polyline
               coordinates={routeCoords}
               strokeColor={SHELTER_COLORS.route}
@@ -120,7 +113,6 @@ export default function SafeRouteMap({
           </>
         ) : null}
 
-        {/* User location marker (HARDCODED DEMO or device GPS) */}
         <Marker
           coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }}
           anchor={{ x: 0.5, y: 0.5 }}
@@ -149,7 +141,6 @@ export default function SafeRouteMap({
           </View>
         </Marker>
 
-        {/* Shelter markers */}
         {shelters.map((s: Shelter) => {
           const selected = s.id === selectedShelterId;
           const color = SHELTER_COLORS[s.type];
@@ -163,30 +154,19 @@ export default function SafeRouteMap({
             >
               <View
                 style={{
-                  width: selected ? 44 : 32,
-                  height: selected ? 44 : 32,
-                  borderRadius: selected ? 22 : 16,
+                  width: selected ? 36 : 26,
+                  height: selected ? 36 : 26,
+                  borderRadius: selected ? 18 : 13,
                   backgroundColor: color,
                   borderColor: '#ffffff',
                   borderWidth: 3,
-                  alignItems: 'center',
-                  justifyContent: 'center',
                 }}
-              >
-                <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-                  <View
-                    style={{
-                      paddingHorizontal: 2,
-                    }}
-                  />
-                </View>
-              </View>
+              />
             </Marker>
           );
         })}
       </MapView>
-      {/* Avoid unused-var lint for crisisMode — native style is fixed raster.
-         crisisMode is reflected in the chrome UI above the map instead. */}
+      {/* crisisMode is reflected in the chrome UI above the map instead. */}
       {/* eslint-disable-next-line @typescript-eslint/no-unused-expressions */}
       {crisisMode ? null : null}
     </View>
